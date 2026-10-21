@@ -29,6 +29,7 @@
 // Text may contain raw element patterns in braces, e.g. "{...-.-}" for SK.
 
 #include "config.h"
+#include "keyer_types.h"
 
 #define FW_VERSION "0.1.0"
 
@@ -147,7 +148,6 @@ static void qClear() { qHead = qTail = qLen = 0; }
 // ---------------------------------------------------------------------------
 // Text sender (station keys the rig from here)
 // ---------------------------------------------------------------------------
-enum TState : uint8_t { T_IDLE, T_ELEM, T_GAP, T_WAIT, T_TUNE };
 static TState tState = T_IDLE;
 static char tPat[MAX_PAT + 1];
 static uint8_t tIdx = 0;
@@ -202,8 +202,6 @@ static void abortText() {
 // ---------------------------------------------------------------------------
 // Iambic paddle keyer + decoder
 // ---------------------------------------------------------------------------
-enum PState : uint8_t { P_IDLE, P_ELEM, P_GAP };
-enum Elem : uint8_t { E_NONE, E_DIT, E_DAH };
 static PState pState = P_IDLE;
 static Elem curElem = E_NONE, lastElem = E_NONE;
 static bool ditLatch = false, dahLatch = false;
