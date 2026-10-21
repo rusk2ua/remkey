@@ -1,0 +1,24 @@
+# remkey station service config (shack PC). Copy to station.toml and edit.
+
+# Shared secret: same string in client.toml. Generate with:  python -m remkey.genkey
+secret = "CHANGE-ME-run-python-m-remkey-genkey"
+
+# 0.0.0.0 = reachable through a router port-forward.
+# 127.0.0.1 = only reachable through an AnyDesk TCP tunnel (nothing exposed on the router).
+listen_host = "0.0.0.0"
+listen_port = 7373
+
+# The station Nano's COM port (Device Manager -> Ports). Not the SO2R+, not the 7610.
+keyer_port = "COM7"
+keyer_baud = 115200
+
+# No traffic from the client for this long -> PTT off, queued text flushed.
+heartbeat_timeout_s = 3.0
+
+# Station re-keys a little faster than you send so its buffer never piles up.
+wpm_offset = 2
+
+# Longest tune carrier a client may request (ms).
+max_tune_ms = 15000
+
+log_file = "remkey-station.log"

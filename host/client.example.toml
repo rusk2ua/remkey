@@ -1,0 +1,24 @@
+# remkey client config (your Mac). Copy to client.toml and edit.
+
+secret = "CHANGE-ME-run-python-m-remkey-genkey"
+
+# Router port-forward: your Spectrum public IP or a DNS name for it.
+# AnyDesk TCP tunnel: 127.0.0.1 and the local port you chose for the tunnel.
+station_host = "203.0.113.10"
+station_port = 7373
+
+# Travel Nano: ls /dev/cu.usbserial-* (CH340 clones) or /dev/cu.usbmodem*
+keyer_port = "/dev/cu.usbserial-110"
+keyer_baud = 115200
+
+wpm = 18
+sidetone_hz = 600
+
+# Ctrl-U tune carrier length (station caps it with max_tune_ms)
+tune_ms = 5000
+
+# Play text you type on the local sidetone too
+echo_typed = true
+
+reconnect_s = 3.0
+heartbeat_s = 1.0
