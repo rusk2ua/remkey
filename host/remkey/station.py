@@ -15,7 +15,6 @@ import asyncio
 import logging
 import sys
 import time
-from typing import Optional
 
 from . import protocol as P
 from .config import StationConfig, load_station
@@ -55,7 +54,7 @@ class TelemetryHub:
         self.xv_cal = Calibration(cfg.xv_cal)
         self.stats = LinkStats()
         self.csv = CsvLog(cfg.tlm_csv) if cfg.tlm_csv else None
-        self.latest: Optional[dict] = None
+        self.latest: dict | None = None
         self.replies = ReplyAssembler()
         self.xv_replies: dict[str, dict] = {}     # "s"/"v" -> {"text", "time"}
         self.lock_ok = True
@@ -140,7 +139,7 @@ class TelemetryHub:
             self.stale = True
             self._alert("warn", f"tower telemetry lost (no packet for {self.cfg.tlm_stale_s:.0f} s)")
 
-    def snapshot(self) -> Optional[dict]:
+    def snapshot(self) -> dict | None:
         if self.latest is None:
             return None
         snap = dict(self.latest)
@@ -154,16 +153,16 @@ class TelemetryHub:
 
 
 class StationService:
-    def __init__(self, cfg: StationConfig, link: KeyerLink, tlm_link: Optional[KeyerLink] = None):
+    def __init__(self, cfg: StationConfig, link: KeyerLink, tlm_link: KeyerLink | None = None):
         self.cfg = cfg
         self.link = link
         self.tlm_link = tlm_link
         self.tlm = TelemetryHub(cfg, self._notify) if tlm_link is not None else None
-        self.session: Optional[Session] = None
+        self.session: Session | None = None
         self.ptt = False
         self.wpm = 18
-        self.server: Optional[asyncio.base_events.Server] = None
-        self._hb_task: Optional[asyncio.Task] = None
+        self.server: asyncio.base_events.Server | None = None
+        self._hb_task: asyncio.Task | None = None
         link.set_handler(self._on_keyer_line)
         if tlm_link is not None:
             tlm_link.set_handler(self.tlm.on_line)
@@ -281,7 +280,7 @@ class StationService:
             while True:
                 try:
                     line = await asyncio.wait_for(reader.readline(), timeout=self.cfg.heartbeat_timeout_s)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     why = "heartbeat lost"
                     await sess.send({"t": "wdog", "why": "station lost heartbeat"})
                     break
@@ -357,7 +356,7 @@ class StationService:
 async def _amain(cfg: StationConfig, dry_run: bool) -> None:
     loop = asyncio.get_running_loop()
     link: KeyerLink = FakeLink() if dry_run else SerialLink(cfg.keyer_port, cfg.keyer_baud, loop)
-    tlm_link: Optional[KeyerLink] = None
+    tlm_link: KeyerLink | None = None
     if cfg.tlm_port and not dry_run:
         tlm_link = SerialLink(cfg.tlm_port, cfg.tlm_baud, loop)
     svc = StationService(cfg, link, tlm_link)

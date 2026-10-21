@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.13"]
+    defaults:
+      run:
+        working-directory: host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: python -m pip install -e ".[test]" ruff
+      - name: Lint
+        run: ruff check .
+      - name: Test
+        run: python -m pytest -q
+
+  firmware-sim:
+    name: Firmware simulation (g++)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keyer timing, decoder, watchdog (both roles, iambic A and B)
+        run: tests/firmware_sim/run.sh
+
+  firmware-build:
+    name: Build ${{ matrix.sketch }} (${{ matrix.role }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { sketch: remkey, role: client,  flag: REMKEY_ROLE=1 }
+          - { sketch: remkey, role: station, flag: REMKEY_ROLE=2 }
+          - { sketch: remtlm, role: tower,   flag: REMTLM_ROLE=1 }
+          - { sketch: remtlm, role: base,    flag: REMTLM_ROLE=2 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install AVR core and libraries
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr
+          arduino-cli lib install "EByte LoRa E220 library@1.0.8" "OneWire@2.3.8" "DallasTemperature@4.0.6"
+      - name: Compile for Arduino Nano
+        run: >
+          arduino-cli compile --fqbn arduino:avr:nano --warnings all
+          --build-property "build.extra_flags=-D${{ matrix.flag }}"
+          --output-dir build firmware/${{ matrix.sketch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.sketch }}-${{ matrix.role }}-hex
+          path: build/*.ino.hex

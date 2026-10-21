@@ -10,9 +10,9 @@ from __future__ import annotations
 import bisect
 import csv
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Sequence
 
 TEMP_NONE = -32768
 LOCK_DISABLED = 2
@@ -24,9 +24,9 @@ class Packet:
     pa_pk_mv: int
     pa_avg_mv: int
     xv_pk_mv: int
-    lock: Optional[bool]          # None = lock monitoring disabled on the tower
-    temp_c: Optional[float]       # probe 1
-    temp2_c: Optional[float]      # probe 2
+    lock: bool | None          # None = lock monitoring disabled on the tower
+    temp_c: float | None       # probe 1
+    temp2_c: float | None      # probe 2
     uptime_s: int
     call: str
 
@@ -48,7 +48,7 @@ def xor_checksum(body: str) -> int:
     return x
 
 
-def _checked_body(line: str) -> Optional[str]:
+def _checked_body(line: str) -> str | None:
     line = line.strip()
     if len(line) < 8 or not line.startswith("$") or line[-3] != "*":
         return None
@@ -59,7 +59,7 @@ def _checked_body(line: str) -> Optional[str]:
         return None
 
 
-def _temp(c10: str) -> Optional[float]:
+def _temp(c10: str) -> float | None:
     v = int(c10)
     return None if v == TEMP_NONE else v / 10.0
 
@@ -91,7 +91,7 @@ def parse_any(line: str):
     return None
 
 
-def parse_packet(line: str) -> Optional[Packet]:
+def parse_packet(line: str) -> Packet | None:
     """Return a readings Packet, or None."""
     p = parse_any(line)
     return p if isinstance(p, Packet) else None
@@ -125,12 +125,12 @@ class ReplyAssembler:
     """
 
     def __init__(self) -> None:
-        self._capture: Optional[int] = None
+        self._capture: int | None = None
         self._parts: dict[int, str] = {}
         self._total = 0
         self._cmd = ""
 
-    def add(self, rp: ReplyPart) -> Optional[tuple[str, str]]:
+    def add(self, rp: ReplyPart) -> tuple[str, str] | None:
         if rp.capture != self._capture:
             self._capture, self._parts, self._total, self._cmd = rp.capture, {}, rp.total, rp.cmd
         self._parts[rp.part] = rp.text
@@ -158,7 +158,7 @@ class Calibration:
     def __bool__(self) -> bool:
         return len(self.mv) >= 2
 
-    def watts(self, mv: float) -> Optional[float]:
+    def watts(self, mv: float) -> float | None:
         if not self:
             return None
         if mv <= self.mv[0]:
@@ -178,12 +178,12 @@ class LinkStats:
     received: int = 0
     lost: int = 0
     resets: int = 0
-    last_seq: Optional[int] = None
-    last_uptime: Optional[int] = None
-    last_rx: Optional[float] = None
+    last_seq: int | None = None
+    last_uptime: int | None = None
+    last_rx: float | None = None
     recent: list = field(default_factory=list)   # (time, lost_before_this) for loss %
 
-    def update(self, p: Packet, now: Optional[float] = None) -> None:
+    def update(self, p: Packet, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
         gap = 0
         if self.last_uptime is not None and p.uptime_s < self.last_uptime:
@@ -205,7 +205,7 @@ class LinkStats:
         lost = sum(g for _, g in self.recent)
         return 100.0 * lost / (got + lost) if got + lost else 0.0
 
-    def age_s(self, now: Optional[float] = None) -> Optional[float]:
+    def age_s(self, now: float | None = None) -> float | None:
         if self.last_rx is None:
             return None
         return (time.monotonic() if now is None else now) - self.last_rx
@@ -223,7 +223,7 @@ class CsvLog:
             with self.path.open("w", newline="", encoding="utf-8") as f:
                 csv.writer(f).writerow(self.HEADER)
 
-    def write(self, p: Packet, pa_pk_w: Optional[float], pa_avg_w: Optional[float]) -> None:
+    def write(self, p: Packet, pa_pk_w: float | None, pa_avg_w: float | None) -> None:
         with self.path.open("a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow([
                 time.strftime("%Y-%m-%d %H:%M:%S"), p.seq, p.pa_pk_mv, p.pa_avg_mv,

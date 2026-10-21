@@ -1,19 +1,28 @@
 import asyncio
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+from test_station_client import SECRET, NullOut, raw_connect, wait_for
 
 from remkey import protocol as P
 from remkey.client import ClientApp, Console
 from remkey.config import ClientConfig, StationConfig
 from remkey.serial_link import FakeLink
 from remkey.station import StationService
-from remkey.telemetry import (Calibration, LinkStats, Packet, ReplyAssembler, ReplyPart,
-                              format_packet, format_reply, parse_any, parse_packet)
-
-from test_station_client import SECRET, NullOut, raw_connect, wait_for
+from remkey.telemetry import (
+    Calibration,
+    LinkStats,
+    Packet,
+    ReplyAssembler,
+    ReplyPart,
+    format_packet,
+    format_reply,
+    parse_any,
+    parse_packet,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -56,22 +65,22 @@ def test_reply_reassembly_and_loss():
 
 @pytest.mark.skipif(shutil.which("g++") is None, reason="needs g++")
 def test_firmware_packets_parse(tmp_path):
-    exe = tmp_path / "tlm_proto_test"
+    exe = tmp_path / ("tlm_proto_test.exe" if sys.platform == "win32" else "tlm_proto_test")
     subprocess.run(["g++", "-std=c++17", "-I", str(REPO / "firmware/remtlm"),
                     str(REPO / "tests/firmware_sim/tlm_proto_test.cpp"), "-o", str(exe)], check=True)
     out = subprocess.run([str(exe)], capture_output=True, text=True)
     assert out.returncode == 0, out.stdout
-    lines = [l for l in out.stdout.splitlines() if l.startswith("$RT")]
-    pk = [parse_packet(l) for l in lines]
+    lines = [ln for ln in out.stdout.splitlines() if ln.startswith("$RT")]
+    pk = [parse_packet(ln) for ln in lines]
     assert pk[0] == Packet(65535, 4987, 1234, 0, True, 45.2, 31.8, 86400, "K2UA")
     assert pk[1].temp_c is None and pk[1].temp2_c is None and pk[1].lock is False
     assert pk[1].xv_pk_mv == 2500
     assert pk[2].temp_c == -10.5 and pk[2].lock is None
     a = ReplyAssembler()
     done = None
-    for l in out.stdout.splitlines():
-        if l.startswith("$RK"):
-            done = a.add(parse_any(l)) or done
+    for ln in out.stdout.splitlines():
+        if ln.startswith("$RK"):
+            done = a.add(parse_any(ln)) or done
     cmd, text = done
     assert cmd == "s"
     assert text.splitlines() == ["MKU 10 G5", "IF RX: 028 MHz IF TX: 028 MHz",
@@ -140,10 +149,10 @@ async def test_station_forwards_and_alerts(station_tlm):
     assert "PA heatsink HOT" in msgs and "transverter case HOT" in msgs
 
     # transverter reply relayed and queryable
-    for l in format_reply(1, "v", "MKU10G5 V2.1"):
-        tlink.inject(l)
-    for l in format_reply(2, "s", "D1 50 D2 50|REF PLL locked"):
-        tlink.inject(l)
+    for ln in format_reply(1, "v", "MKU10G5 V2.1"):
+        tlink.inject(ln)
+    for ln in format_reply(2, "s", "D1 50 D2 50|REF PLL locked"):
+        tlink.inject(ln)
     writer.write(P.encode({"t": "xvq"}))
     await writer.drain()
     while True:
@@ -183,8 +192,8 @@ async def test_client_tx_peak_summary(station_tlm):
     await wait_for(lambda: "tower: PA peak" in out.text)
     assert "PA heatsink 30.0 C" in out.text and "transverter case 25.0 C" in out.text
 
-    for l in format_reply(9, "s", "REF PLL locked"):
-        tlink.inject(l)
+    for ln in format_reply(9, "s", "REF PLL locked"):
+        tlink.inject(ln)
     app.on_key("\x0b")                                       # Ctrl-K
     await wait_for(lambda: "REF PLL locked" in out.text)
     app.quit.set()

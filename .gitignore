@@ -9,3 +9,4 @@ host/client.toml
 tests/firmware_sim/sim_*
 !tests/firmware_sim/sim_test.cpp
 remkey-tlm.csv
+.ruff_cache/

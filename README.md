@@ -1,5 +1,10 @@
 # remkey — remote paddle CW for the IC-7610 (or any rig with a KEY jack)
 
+[![CI](https://github.com/rusk2ua/remkey/actions/workflows/ci.yml/badge.svg)](https://github.com/rusk2ua/remkey/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+> **Status:** the software is complete and tested in CI (simulation, end-to-end network tests, and firmware builds for every Nano image), but it has **not yet been run on real hardware**. Sections 7 and 9 have the first-power-up checklists. Reports from real stations are very welcome.
+
 Send CW with your own paddle from anywhere, with an instant local sidetone, and have the shack re-key it with perfect timing. Remote PTT (the TRANSMIT button) included.
 
 remkey is built for a station where:
@@ -8,7 +13,9 @@ remkey is built for a station where:
 - The 7610 drives a tower-mounted 10 GHz transverter through its SEND line, so PTT is manual and keying is CW.
 - You travel with a Mac and want to use a real paddle.
 
-It is two Arduino Nanos running the same sketch, plus a small Python bridge.
+It is two Arduino Nanos running the same sketch, plus a small Python bridge. An optional second pair of Nanos (**remtlm**, section 9) brings tower-top PA power, temperatures, reference lock and Kuhne transverter status into the radio room over a LoRa link.
+
+**Quick start:** wire and flash the Nanos (sections 1–3), run the station service on the shack PC (section 4), pick a network path (section 5), and run the client on your Mac (section 6). Do the bench test (section 7) before connecting anything to the tower.
 
 ```
   TRAVEL END (Mac)                                         SHACK (Windows PC)
@@ -50,8 +57,11 @@ host/remkey/protocol.py        network protocol, CW text sanitiser
 host/remkey/telemetry.py       remtlm packet parsing, calibration, link statistics
 host/remkey/tlmview.py         bench viewer for calibrating the PA power sense
 host/*.example.toml            config templates
-host/tests/                    pytest: protocol + end-to-end over localhost
+host/tests/                    pytest: protocol, end-to-end over localhost, telemetry
 tests/firmware_sim/            g++ simulation of the sketch (timing, decoder, watchdog)
+.github/workflows/ci.yml       CI: Python on Linux/Windows/macOS, simulation, firmware builds
+CHANGELOG.md                   per-component versions and changes
+CONTRIBUTING.md, SECURITY.md   how to run the checks; security model and reporting
 ```
 
 ---
@@ -278,9 +288,11 @@ Paddle characters sent while the link is down are **dropped**, not buffered, so 
 ## 8. Development
 
 ```
-cd host && python3 -m pip install -e ".[test]" && python3 -m pytest -q
+cd host && python3 -m pip install -e ".[test]" ruff && ruff check . && python3 -m pytest -q
 tests/firmware_sim/run.sh       # needs g++; runs the sketch against a mock Arduino
 ```
+
+GitHub Actions runs all of this on every push and pull request, plus an `arduino-cli` build of all four firmware images. The resulting `.hex` files are attached to each CI run as artifacts. See CONTRIBUTING.md.
 
 The firmware simulation checks:
 
@@ -293,15 +305,15 @@ The firmware simulation checks:
 - PTT button debounce.
 - That the client paddle never drives the KEY output.
 
-Both sketches (remkey and remtlm, every role) also compile cleanly with avr-gcc 14.1 against the Arduino AVR core and the real libraries, with `-Wall -Wextra`:
+Every firmware image builds with no warnings in the project's own files (`arduino-cli`, board Arduino Nano, `--warnings all`):
 
 | Image | Flash | Static RAM |
 |---|---|---|
-| remkey client / station | 8.3 KB | 545 B |
-| remtlm tower | 15.8 KB | 795 B |
-| remtlm base | 8.0 KB | 465 B |
+| remkey client / station | 7.9 KB of 30 KB | 541 B of 2 KB |
+| remtlm tower | 15.2 KB | 774 B |
+| remtlm base | 7.3 KB | 446 B |
 
-None of it has run on real hardware yet. The bench tests in sections 7 and 9 are the first-power-up checklists.
+Library versions used in CI: EByte LoRa E220 library 1.0.8, OneWire 2.3.8, DallasTemperature 4.0.6.
 
 ## 9. Tower telemetry (remtlm)
 
@@ -405,7 +417,7 @@ Only the E220 block above, plus USB to the shack PC. Put the module and its ante
 
 ### Build and check
 
-1. In the Arduino IDE, install **EByte LoRa E220 library** (Renzo Mischianti), **OneWire** and **DallasTemperature**.
+1. In the Arduino IDE, install **EByte LoRa E220 library** (Renzo Mischianti), **OneWire** and **DallasTemperature**. CI builds with versions 1.0.8, 2.3.8 and 4.0.6.
 2. Open `firmware/remtlm/remtlm.ino`, set `REMTLM_ROLE` in `config.h`, and upload the TOWER image to one Nano and the BASE image to the other. Alternatively, run `pio run -e tower` / `-e base` from `firmware/remtlm`.
 3. At boot, each Nano prints `V:remtlm 0.2.0 tower|base`, then `C:ok ch=77 freq_khz=927125`. The first boot also prints `C:written`, since it writes the settings to the module once.
    - `C:ERR read config` means the Nano can't talk to the module: check the M0, M1 and AUX wiring and the module's power.

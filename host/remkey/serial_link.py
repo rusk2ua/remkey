@@ -6,7 +6,8 @@ import asyncio
 import logging
 import threading
 import time
-from typing import Callable, Optional, Protocol
+from collections.abc import Callable
+from typing import Protocol
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class SerialLink:
     they are a few bytes at 115200 baud.
     """
 
-    def __init__(self, port: str, baud: int = 115200, loop: Optional[asyncio.AbstractEventLoop] = None):
+    def __init__(self, port: str, baud: int = 115200, loop: asyncio.AbstractEventLoop | None = None):
         import serial  # pyserial; imported here so tests don't need it
 
         self.port = port

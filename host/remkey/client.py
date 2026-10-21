@@ -24,7 +24,6 @@ import logging
 import sys
 import threading
 import time
-from typing import Optional
 
 from . import protocol as P
 from .config import ClientConfig, load_client
@@ -36,7 +35,8 @@ CTRL = {chr(i + 1): chr(ord("A") + i) for i in range(26)}  # '\x14' -> 'T'
 ESC = "\x1b"
 
 HOTKEY_HELP = (
-    "Ctrl-T PTT | Ctrl-U tune | Esc abort | Ctrl-F/Ctrl-S speed | Ctrl-G status | Ctrl-P PA | Ctrl-K XV | Ctrl-Q quit"
+    "Ctrl-T PTT | Ctrl-U tune | Esc abort | Ctrl-F/Ctrl-S speed | Ctrl-G status"
+    " | Ctrl-P PA | Ctrl-K XV | Ctrl-Q quit"
 )
 
 
@@ -61,19 +61,19 @@ class Console:
 
 
 class ClientApp:
-    def __init__(self, cfg: ClientConfig, link: KeyerLink, console: Optional[Console] = None):
+    def __init__(self, cfg: ClientConfig, link: KeyerLink, console: Console | None = None):
         self.cfg = cfg
         self.link = link
         self.console = console or Console()
         self.wpm = cfg.wpm
         self.station_ptt = False
         self.connected = False
-        self.rtt_ms: Optional[float] = None
+        self.rtt_ms: float | None = None
         self.quit = asyncio.Event()
-        self._writer: Optional[asyncio.StreamWriter] = None
+        self._writer: asyncio.StreamWriter | None = None
         self._typed = ""     # buffer for <PROSIGN> typing
-        self.tlm: Optional[dict] = None
-        self._tx_peak: Optional[tuple] = None   # (watts or None, mV) peak during this PTT
+        self.tlm: dict | None = None
+        self._tx_peak: tuple | None = None   # (watts or None, mV) peak during this PTT
         link.set_handler(self.on_keyer_line)
 
     # ------------------------------------------------------------ outbound
@@ -143,7 +143,7 @@ class ClientApp:
             f" avg {self._power(m.get('pa_avg_w'), m.get('pa_avg_mv'))}",
             f"XV {self._power(m.get('xv_pk_w'), m.get('xv_pk_mv'))}",
         ]
-        for name, temp in zip(names, (m.get("temp_c"), m.get("temp2_c"))):
+        for name, temp in zip(names[:2], (m.get("temp_c"), m.get("temp2_c")), strict=False):
             if isinstance(temp, (int, float)):
                 parts.append(f"{name} {temp:.1f} C")
         lock = m.get("lock")
@@ -338,7 +338,7 @@ class ClientApp:
                         self._send({"t": "ptt", "on": False})
                         await writer.drain()
                     sess.cancel()
-            except (OSError, ConnectionError, asyncio.TimeoutError, ValueError) as exc:
+            except (TimeoutError, OSError, ConnectionError, ValueError) as exc:
                 self.console.event(f"station link: {exc or type(exc).__name__}")
             finally:
                 if writer is not None:
@@ -347,7 +347,7 @@ class ClientApp:
             if not self.quit.is_set():
                 try:
                     await asyncio.wait_for(self.quit.wait(), timeout=self.cfg.reconnect_s)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
 
 
