@@ -40,9 +40,11 @@
 
 // Tower-only
 #define PIN_PA_SENSE   A0   // PA power-sense output (0-5 V) via divider
-#define PIN_XV_SENSE   A1   // transverter power-sense output (0-5 V) via divider
-#define PIN_LO_LOCK    4    // transverter LO-lock output
-#define PIN_ONEWIRE    5    // DS18B20 heatsink probe (4.7k pull-up to 5 V)
+#define PIN_XV_SENSE   A1   // MKU 10 G5 CON1 pin 9 MON via divider
+#define PIN_LO_LOCK    A2   // MKU 10 G5 CON1 pin 16 LD (3.3 V = locked), read as analog
+#define PIN_ONEWIRE    5    // DS18B20 probes (4.7k pull-up to 5 V); up to 2 on one bus
+#define PIN_XV_RX      11   // Nano RX  <- level shifter <- MKU CON1 pin 11 TXD
+#define PIN_XV_TX      12   // Nano TX  -> level shifter -> MKU CON1 pin 12 RXD
 
 // ---------------------------------------------------------------------------
 // Analog scaling (tower). The host converts mV to watts with your calibration
@@ -54,7 +56,24 @@
 #define VREF_MV          5000UL
 #define DIVIDER_X1000    1455UL
 
-#define LOCK_ACTIVE_HIGH 1      // 1 if the LO-lock output is HIGH when locked
+// MKU 10 G5 LD (pin 16) is 3.3 V only while locked to an EXTERNAL 10 MHz reference.
+// Without an external reference it stays low: set LOCK_MONITOR 0 to stop alarms.
+#define LOCK_MONITOR      1
+#define LOCK_ACTIVE_HIGH  1
+#define LOCK_THRESHOLD_MV 1650   // at the pin (no divider on A2)
+
+// ---------------------------------------------------------------------------
+// Kuhne MKU 10 G5 serial interface (3.3 V, 9600 8N1). Read-only: the tower
+// only ever sends "s" (status) and "v" (version), never configuration commands.
+// ---------------------------------------------------------------------------
+#define XV_SERIAL_ENABLE  1
+#define XV_BAUD           9600
+#define XV_CMD_SUFFIX     ""       // add "\r" here if the transverter wants a terminator
+#define XV_POLL_MS        60000UL  // status ("s") poll period
+#define XV_FIRST_POLL_MS  5000UL   // first poll after boot ("v" then "s")
+#define XV_REPLY_GAP_MS   300UL    // reply is complete after this much silence
+#define XV_REPLY_MAX_MS   2000UL   // give up waiting for a reply
+#define XV_BUF            240      // longest reply kept (bytes)
 
 // ---------------------------------------------------------------------------
 // Reporting (tower)

@@ -9,7 +9,8 @@ Hotkeys (terminal):
     Ctrl-T  toggle PTT            Esc     abort queued text / tune
     Ctrl-U  tune carrier (needs PTT on; press Esc to stop early)
     Ctrl-F  faster (+1 WPM)       Ctrl-S  slower (-1 WPM)
-    Ctrl-G  status / RTT          Ctrl-P  tower PA power, temp, LO lock
+    Ctrl-G  status / RTT          Ctrl-P  tower PA power, temperatures, ref lock
+    Ctrl-K  transverter (Kuhne) status and firmware version
     Ctrl-Q or Ctrl-C  quit
     Any other printable key is sent as CW; Enter sends a space.
     Type <SK>, <AR>, <BT>, <KN> for prosigns.
@@ -35,7 +36,7 @@ CTRL = {chr(i + 1): chr(ord("A") + i) for i in range(26)}  # '\x14' -> 'T'
 ESC = "\x1b"
 
 HOTKEY_HELP = (
-    "Ctrl-T PTT | Ctrl-U tune | Esc abort | Ctrl-F/Ctrl-S speed | Ctrl-G status | Ctrl-P PA | Ctrl-Q quit"
+    "Ctrl-T PTT | Ctrl-U tune | Esc abort | Ctrl-F/Ctrl-S speed | Ctrl-G status | Ctrl-P PA | Ctrl-K XV | Ctrl-Q quit"
 )
 
 
@@ -136,15 +137,19 @@ class ClientApp:
         return f"{w:.1f} W" if isinstance(w, (int, float)) else f"{mv} mV"
 
     def tlm_line(self, m: dict) -> str:
-        temp = m.get("temp_c")
+        names = m.get("temp_names") or ["probe 1", "probe 2"]
         parts = [
             f"PA peak {self._power(m.get('pa_pk_w'), m.get('pa_pk_mv'))}"
             f" avg {self._power(m.get('pa_avg_w'), m.get('pa_avg_mv'))}",
             f"XV {self._power(m.get('xv_pk_w'), m.get('xv_pk_mv'))}",
-            f"heatsink {temp:.1f} C" if isinstance(temp, (int, float)) else "heatsink n/a",
-            "LO locked" if m.get("lock") else "LO UNLOCKED",
-            f"link loss {m.get('loss_pct', 0)}%",
         ]
+        for name, temp in zip(names, (m.get("temp_c"), m.get("temp2_c"))):
+            if isinstance(temp, (int, float)):
+                parts.append(f"{name} {temp:.1f} C")
+        lock = m.get("lock")
+        if lock is not None:
+            parts.append("ref locked" if lock else "ref UNLOCKED")
+        parts.append(f"link loss {m.get('loss_pct', 0)}%")
         if m.get("stale"):
             parts.append(f"STALE ({m.get('age_s')} s old)")
         return "tower: " + " | ".join(parts)
@@ -197,6 +202,9 @@ class ClientApp:
                 self.status()
             elif key == "P":
                 self.show_tlm()
+            elif key == "K":
+                if not self._send({"t": "xvq"}):
+                    self.console.event("transverter status needs the station link")
             elif key in ("Q", "C"):
                 self.quit.set()
             return
@@ -276,6 +284,16 @@ class ClientApp:
                     self._tx_peak = (w, mv)
             if "age_s" in msg:          # reply to Ctrl-P
                 self.console.event(self.tlm_line(msg))
+        elif t == "xvstat":
+            if msg.get("query"):
+                if msg.get("version"):
+                    self.console.event("transverter firmware: " + msg["version"].replace("\n", " / "))
+                if msg.get("text"):
+                    self.console.event(f"transverter status ({msg.get('age_s')} s old):")
+                    for ln in msg["text"].splitlines():
+                        self.console.event("   " + ln)
+                else:
+                    self.console.event("no transverter status received yet")
         elif t == "alert":
             mark = "!!" if msg.get("level") == "warn" else "--"
             self.console.event(f"{mark} {msg.get('msg')}")

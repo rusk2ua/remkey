@@ -14,7 +14,7 @@ import sys
 import time
 
 from .config import load_station
-from .telemetry import Calibration, LinkStats, parse_packet
+from .telemetry import Calibration, LinkStats, Packet, ReplyAssembler, ReplyPart, parse_any
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
         pa_cal, xv_cal = Calibration(cfg.pa_cal), Calibration(cfg.xv_cal)
 
     stats = LinkStats()
+    replies = ReplyAssembler()
     with serial.Serial(args.port, args.baud, timeout=1) as ser:
         print(f"listening on {args.port} (Ctrl-C to stop)")
         while True:
@@ -42,8 +43,16 @@ def main(argv: list[str] | None = None) -> int:
             if not raw:
                 continue
             line = raw.decode("ascii", errors="replace").strip()
-            p = parse_packet(line)
-            if p is None:
+            p = parse_any(line)
+            if isinstance(p, ReplyPart):
+                done = replies.add(p)
+                if done:
+                    cmd, text = done
+                    print(f"{time.strftime('%H:%M:%S')} transverter '{cmd}':")
+                    for ln in text.splitlines():
+                        print(f"      {ln}")
+                continue
+            if not isinstance(p, Packet):
                 if line:
                     print(f"   {line}")
                 continue
@@ -53,10 +62,11 @@ def main(argv: list[str] | None = None) -> int:
                 w = cal.watts(mv)
                 return f"{mv:5d} mV" + (f" = {w:6.2f} W" if w is not None else "")
 
-            temp = "  n/a " if p.temp_c is None else f"{p.temp_c:5.1f} C"
+            temp = "/".join("n/a" if t is None else f"{t:.1f}" for t in (p.temp_c, p.temp2_c)) + " C"
+            lock = {None: "lock n/a", True: "REF LOCK", False: "REF UNLOCK"}[p.lock]
             print(f"{time.strftime('%H:%M:%S')} #{p.seq:<5d} PA pk {fmt(pa_cal, p.pa_pk_mv)}"
                   f"  avg {fmt(pa_cal, p.pa_avg_mv)}  XV {fmt(xv_cal, p.xv_pk_mv)}"
-                  f"  {temp}  {'LOCK' if p.lock else 'UNLOCK'}  loss {stats.loss_pct_5min():.1f}%")
+                  f"  {temp}  {lock}  loss {stats.loss_pct_5min():.1f}%")
     return 0
 
 

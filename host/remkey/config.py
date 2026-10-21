@@ -25,7 +25,9 @@ class StationConfig:
     tlm_baud: int = 115200
     pa_cal: list = field(default_factory=list)     # [[mV, watts], ...]
     xv_cal: list = field(default_factory=list)
-    temp_warn_c: float = 65.0
+    temp_warn_c: float = 65.0                      # probe 1 (PA heatsink)
+    temp2_warn_c: float = 50.0                     # probe 2 (MKU case: 55 C max, TX off at 65)
+    temp_names: list = field(default_factory=lambda: ["PA heatsink", "transverter case"])
     tlm_stale_s: float = 10.0
     tlm_csv: str = "remkey-tlm.csv"
 

@@ -1,7 +1,8 @@
 """Tower telemetry: parse remtlm packets, apply calibration, track link health.
 
-Packet (see firmware/remtlm/tlm_proto.h):
-    $RT,<seq>,<pa_pk_mv>,<pa_avg_mv>,<xv_pk_mv>,<lock>,<temp_c10>,<uptime_s>,<call>*HH
+Packets (see firmware/remtlm/tlm_proto.h):
+    $RT,<seq>,<pa_pk_mv>,<pa_avg_mv>,<xv_pk_mv>,<lock>,<t1_c10>,<t2_c10>,<uptime_s>,<call>*HH
+    $RK,<id>,<cmd>,<part>,<total>,<text>,<call>*HH     transverter serial reply, in parts
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 TEMP_NONE = -32768
+LOCK_DISABLED = 2
 
 
 @dataclass
@@ -22,9 +24,20 @@ class Packet:
     pa_pk_mv: int
     pa_avg_mv: int
     xv_pk_mv: int
-    lock: bool
-    temp_c: Optional[float]
+    lock: Optional[bool]          # None = lock monitoring disabled on the tower
+    temp_c: Optional[float]       # probe 1
+    temp2_c: Optional[float]      # probe 2
     uptime_s: int
+    call: str
+
+
+@dataclass
+class ReplyPart:
+    capture: int
+    cmd: str
+    part: int
+    total: int
+    text: str
     call: str
 
 
@@ -35,39 +48,97 @@ def xor_checksum(body: str) -> int:
     return x
 
 
-def parse_packet(line: str) -> Optional[Packet]:
-    """Return a Packet, or None if the line isn't a valid remtlm packet."""
+def _checked_body(line: str) -> Optional[str]:
     line = line.strip()
-    if not line.startswith("$RT,") or len(line) < 8 or line[-3] != "*":
+    if len(line) < 8 or not line.startswith("$") or line[-3] != "*":
         return None
     body, given = line[1:-3], line[-2:]
     try:
-        if xor_checksum(body) != int(given, 16):
-            return None
-        f = body.split(",")
-        if len(f) != 9:
-            return None
-        temp_c10 = int(f[6])
-        return Packet(
-            seq=int(f[1]),
-            pa_pk_mv=int(f[2]),
-            pa_avg_mv=int(f[3]),
-            xv_pk_mv=int(f[4]),
-            lock=f[5] == "1",
-            temp_c=None if temp_c10 == TEMP_NONE else temp_c10 / 10.0,
-            uptime_s=int(f[7]),
-            call=f[8],
-        )
+        return body if xor_checksum(body) == int(given, 16) else None
     except ValueError:
         return None
 
 
+def _temp(c10: str) -> Optional[float]:
+    v = int(c10)
+    return None if v == TEMP_NONE else v / 10.0
+
+
+def parse_any(line: str):
+    """Return a Packet, a ReplyPart, or None for anything else / bad checksum."""
+    body = _checked_body(line)
+    if body is None:
+        return None
+    try:
+        if body.startswith("RT,"):
+            f = body.split(",")
+            if len(f) != 10:
+                return None
+            return Packet(
+                seq=int(f[1]), pa_pk_mv=int(f[2]), pa_avg_mv=int(f[3]), xv_pk_mv=int(f[4]),
+                lock=None if int(f[5]) == LOCK_DISABLED else f[5] == "1",
+                temp_c=_temp(f[6]), temp2_c=_temp(f[7]), uptime_s=int(f[8]), call=f[9],
+            )
+        if body.startswith("RK,"):
+            head = body.split(",", 5)            # RK,id,cmd,part,total,rest
+            if len(head) != 6:
+                return None
+            text, _, call = head[5].rpartition(",")
+            return ReplyPart(capture=int(head[1]), cmd=head[2], part=int(head[3]),
+                             total=int(head[4]), text=text, call=call)
+    except ValueError:
+        return None
+    return None
+
+
+def parse_packet(line: str) -> Optional[Packet]:
+    """Return a readings Packet, or None."""
+    p = parse_any(line)
+    return p if isinstance(p, Packet) else None
+
+
+def _seal(body: str) -> str:
+    return f"${body}*{xor_checksum(body):02X}"
+
+
 def format_packet(p: Packet) -> str:
     """Inverse of parse_packet (used by tests and the bench simulator)."""
-    t = TEMP_NONE if p.temp_c is None else int(round(p.temp_c * 10))
-    body = (f"RT,{p.seq},{p.pa_pk_mv},{p.pa_avg_mv},{p.xv_pk_mv},{1 if p.lock else 0},"
-            f"{t},{p.uptime_s},{p.call}")
-    return f"${body}*{xor_checksum(body):02X}"
+    t1 = TEMP_NONE if p.temp_c is None else int(round(p.temp_c * 10))
+    t2 = TEMP_NONE if p.temp2_c is None else int(round(p.temp2_c * 10))
+    lock = LOCK_DISABLED if p.lock is None else int(p.lock)
+    return _seal(f"RT,{p.seq},{p.pa_pk_mv},{p.pa_avg_mv},{p.xv_pk_mv},{lock},"
+                 f"{t1},{t2},{p.uptime_s},{p.call}")
+
+
+def format_reply(capture: int, cmd: str, text: str, call: str = "K2UA", chunk: int = 48) -> list[str]:
+    """Split a sanitised reply into $RK lines, as the tower does."""
+    parts = [text[i:i + chunk] for i in range(0, len(text), chunk)] or [""]
+    return [_seal(f"RK,{capture},{cmd},{i + 1},{len(parts)},{t},{call}") for i, t in enumerate(parts)]
+
+
+class ReplyAssembler:
+    """Collects $RK parts into whole transverter replies.
+
+    Returns the full text (line breaks restored) when the last part of a capture
+    arrives. If any part was lost, the reply is still returned with "[...]" where
+    the missing text was, rather than silently dropping it.
+    """
+
+    def __init__(self) -> None:
+        self._capture: Optional[int] = None
+        self._parts: dict[int, str] = {}
+        self._total = 0
+        self._cmd = ""
+
+    def add(self, rp: ReplyPart) -> Optional[tuple[str, str]]:
+        if rp.capture != self._capture:
+            self._capture, self._parts, self._total, self._cmd = rp.capture, {}, rp.total, rp.cmd
+        self._parts[rp.part] = rp.text
+        if rp.part != rp.total:
+            return None
+        text = "".join(self._parts.get(i, "[...]") for i in range(1, self._total + 1))
+        self._capture = None
+        return self._cmd, text.replace("|", "\n")
 
 
 class Calibration:
@@ -144,7 +215,7 @@ class CsvLog:
     """Appends one row per packet. Opens the file per write so it's safe to read live."""
 
     HEADER = ["time", "seq", "pa_pk_mv", "pa_avg_mv", "pa_pk_w", "pa_avg_w",
-              "xv_pk_mv", "lo_lock", "temp_c", "uptime_s"]
+              "xv_pk_mv", "ref_lock", "temp1_c", "temp2_c", "uptime_s"]
 
     def __init__(self, path: str):
         self.path = Path(path)
@@ -158,5 +229,7 @@ class CsvLog:
                 time.strftime("%Y-%m-%d %H:%M:%S"), p.seq, p.pa_pk_mv, p.pa_avg_mv,
                 "" if pa_pk_w is None else f"{pa_pk_w:.2f}",
                 "" if pa_avg_w is None else f"{pa_avg_w:.2f}",
-                p.xv_pk_mv, int(p.lock), "" if p.temp_c is None else p.temp_c, p.uptime_s,
+                p.xv_pk_mv, "" if p.lock is None else int(p.lock),
+                "" if p.temp_c is None else p.temp_c,
+                "" if p.temp2_c is None else p.temp2_c, p.uptime_s,
             ])

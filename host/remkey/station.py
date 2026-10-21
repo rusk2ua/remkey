@@ -14,12 +14,13 @@ import argparse
 import asyncio
 import logging
 import sys
+import time
 from typing import Optional
 
 from . import protocol as P
 from .config import StationConfig, load_station
 from .serial_link import FakeLink, KeyerLink, SerialLink
-from .telemetry import Calibration, CsvLog, LinkStats, parse_packet
+from .telemetry import Calibration, CsvLog, LinkStats, Packet, ReplyAssembler, ReplyPart, parse_any
 
 log = logging.getLogger("remkey.station")
 
@@ -55,13 +56,20 @@ class TelemetryHub:
         self.stats = LinkStats()
         self.csv = CsvLog(cfg.tlm_csv) if cfg.tlm_csv else None
         self.latest: Optional[dict] = None
+        self.replies = ReplyAssembler()
+        self.xv_replies: dict[str, dict] = {}     # "s"/"v" -> {"text", "time"}
         self.lock_ok = True
-        self.hot = False
+        self.hot = [False, False]
         self.stale = True
+        names = list(cfg.temp_names) + ["probe 1", "probe 2"]
+        self.temp_names = [str(names[0]), str(names[1])]
 
     def on_line(self, line: str) -> None:
-        p = parse_packet(line)
-        if p is None:
+        p = parse_any(line)
+        if isinstance(p, ReplyPart):
+            self._on_reply(p)
+            return
+        if not isinstance(p, Packet):
             if line.startswith(("V:", "C:")):
                 log.info("telemetry base: %s", line)
             elif line.startswith("E:"):
@@ -86,23 +94,45 @@ class TelemetryHub:
             "xv_pk_w": self.xv_cal.watts(p.xv_pk_mv),
             "lock": p.lock,
             "temp_c": p.temp_c,
+            "temp2_c": p.temp2_c,
+            "temp_names": self.temp_names,
             "uptime_s": p.uptime_s,
             "loss_pct": round(self.stats.loss_pct_5min(), 1),
         }
         if self.stale:
             self.stale = False
             self._alert("ok", "tower telemetry link up")
-        if p.lock != self.lock_ok:
+        if p.lock is not None and p.lock != self.lock_ok:
             self.lock_ok = p.lock
-            self._alert("ok" if p.lock else "warn", "LO locked" if p.lock else "LO UNLOCKED")
-        if p.temp_c is not None:
-            if not self.hot and p.temp_c >= self.cfg.temp_warn_c:
-                self.hot = True
-                self._alert("warn", f"PA heatsink HOT: {p.temp_c:.1f} C")
-            elif self.hot and p.temp_c < self.cfg.temp_warn_c - 3:
-                self.hot = False
-                self._alert("ok", f"PA heatsink back to {p.temp_c:.1f} C")
+            self._alert("ok" if p.lock else "warn",
+                        "10 MHz reference locked" if p.lock else "10 MHz reference UNLOCKED")
+        for i, (t, warn) in enumerate(((p.temp_c, self.cfg.temp_warn_c),
+                                       (p.temp2_c, self.cfg.temp2_warn_c))):
+            if t is None:
+                continue
+            name = self.temp_names[i]
+            if not self.hot[i] and t >= warn:
+                self.hot[i] = True
+                self._alert("warn", f"{name} HOT: {t:.1f} C")
+            elif self.hot[i] and t < warn - 3:
+                self.hot[i] = False
+                self._alert("ok", f"{name} back to {t:.1f} C")
         self.notify(self.latest)
+
+    def _on_reply(self, rp: ReplyPart) -> None:
+        done = self.replies.add(rp)
+        if done is None:
+            return
+        cmd, text = done
+        self.xv_replies[cmd] = {"text": text, "time": time.time()}
+        log.info("transverter '%s' reply: %s", cmd, text.replace("\n", " | "))
+        self.notify(self.xv_message(cmd))
+
+    def xv_message(self, cmd: str) -> dict:
+        r = self.xv_replies.get(cmd)
+        if r is None:
+            return {"t": "xvstat", "cmd": cmd, "text": None, "age_s": None}
+        return {"t": "xvstat", "cmd": cmd, "text": r["text"], "age_s": round(time.time() - r["time"])}
 
     def check_stale(self) -> None:
         age = self.stats.age_s()
@@ -312,6 +342,14 @@ class StationService:
         elif t == "tlmq":
             snap = self.tlm.snapshot() if self.tlm else None
             await sess.send(snap or {"t": "log", "msg": "no tower telemetry"})
+        elif t == "xvq":
+            if not self.tlm:
+                await sess.send({"t": "log", "msg": "no tower telemetry"})
+            else:
+                msg = self.tlm.xv_message("s")
+                msg["version"] = (self.tlm.xv_replies.get("v") or {}).get("text")
+                msg["query"] = True
+                await sess.send(msg)
         else:
             await sess.send({"t": "err", "msg": f"unknown type {t!r}"})
 

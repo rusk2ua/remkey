@@ -40,11 +40,17 @@ pa_cal = [
   # [3400, 10.0],
 ]
 
-# Same for the transverter's own power-sense output (optional)
+# Same for the MKU 10 G5 MON output, CON1 pin 9 (optional)
 xv_cal = []
 
-# Alert when the PA heatsink reaches this temperature (clears 3 C below)
+# Names for DS18B20 probe 1 and probe 2 (bus order is by probe serial number;
+# warm one in your hand while watching tlmview to see which is which)
+temp_names = ["PA heatsink", "transverter case"]
+
+# Alert thresholds (each clears 3 C below). The MKU 10 G5 is rated +55 C case
+# and disables TX above +65 C.
 temp_warn_c = 65.0
+temp2_warn_c = 50.0
 
 # Alert if no telemetry packet arrives for this long
 tlm_stale_s = 10.0

@@ -230,7 +230,8 @@ This requires an AnyDesk plan that includes TCP tunneling.
 | **Ctrl-U** | Tune carrier (`tune_ms`, capped by the station). Needs PTT on. |
 | **Ctrl-F / Ctrl-S** | Speed +1 / −1 WPM, both ends |
 | **Ctrl-G** | Status: link, PTT, WPM, round-trip time (plus tower telemetry if fitted) |
-| **Ctrl-P** | Tower: PA power, transverter power, heatsink temperature, LO lock |
+| **Ctrl-P** | Tower: PA power, transverter power, temperatures, 10 MHz reference lock |
+| **Ctrl-K** | Tower: Kuhne MKU 10 G5 status (`s`) and firmware version (`v`) |
 | **Ctrl-Q / Ctrl-C** | Quit. PTT is dropped first. |
 | Typing | Sent as CW. Enter sends a space. `<SK>`, `<AR>`, `<BT>`, `<KN>` send prosigns. |
 
@@ -297,32 +298,35 @@ Both sketches (remkey and remtlm, every role) also compile cleanly with avr-gcc 
 | Image | Flash | Static RAM |
 |---|---|---|
 | remkey client / station | 8.3 KB | 545 B |
-| remtlm tower | 14.6 KB | 472 B |
-| remtlm base | 8.0 KB | 446 B |
+| remtlm tower | 15.8 KB | 795 B |
+| remtlm base | 8.0 KB | 465 B |
 
 None of it has run on real hardware yet. The bench tests in sections 7 and 9 are the first-power-up checklists.
 
 ## 9. Tower telemetry (remtlm)
 
-A second pair of Nanos brings tower-top readings into the radio room over a LoRa link:
+A second pair of Nanos brings tower-top readings into the radio room over a LoRa link. It's set up for a **Kuhne MKU 10 G5** transverter and an external PA:
 
-- the **PA power-sense output** (peak and average, so CW dits aren't missed)
-- the **transverter power-sense output**
-- **LO lock** (any unlock during a reporting interval is reported)
-- **PA heatsink temperature** from a DS18B20 probe
+- **PA power sense** (0–5 V), peak and average, sampled every 5 ms so CW dits aren't missed
+- **MKU MON** output (CON1 pin 9), the transverter's own power monitor
+- **10 MHz reference lock** from the MKU's LD output (CON1 pin 16); any unlock during a reporting interval is reported
+- **Two DS18B20 probes**: PA heatsink and MKU case
+- **The MKU's serial status**: the `v` (firmware) reply once after boot, then the `s` (status) reply every minute, relayed verbatim
 
 ```
- TOWER TOP (13.8 V from transverter supply)                RADIO ROOM
-┌─────────────────────────────────────────┐            ┌──────────────────────────────┐
-│ PA sense 0-5V ─► A0 ┐                    │  927.125   │ E220 ─► BASE Nano ─USB─► PC   │
-│ XV sense 0-5V ─► A1 ├─ TOWER Nano ─► E220 ~~~ MHz ~~~►│  validates packets   station  │
-│ LO lock ──────► D4  │                    │  LoRa      │                      service  │
-│ DS18B20 ──────► D5 ┘                    │            │  ─► client: Ctrl-P, alerts,   │
-└─────────────────────────────────────────┘            │     "last TX: PA peak 9.0 W"  │
-                                                       └──────────────────────────────┘
+ TOWER TOP (13.8 V supply)                                  RADIO ROOM
+┌──────────────────────────────────────────┐            ┌──────────────────────────────┐
+│ PA sense ─────────► A0 ┐                  │  927.125   │ E220 ─► BASE Nano ─USB─► PC   │
+│ MKU pin 9 MON ────► A1 │                  │    MHz     │  validates packets   station  │
+│ MKU pin 16 LD ────► A2 ├─ TOWER ─► E220 ~~~~~~~~~~~~~~►│                      service  │
+│ DS18B20 ×2 ───────► D5 │   Nano           │    LoRa    │  ─► client: Ctrl-P, Ctrl-K,   │
+│ MKU pins 11/12 ◄──► D11/D12 (via shifter)│            │     alerts, TX peak summary   │
+└──────────────────────────────────────────┘            └──────────────────────────────┘
 ```
 
 There is no conductor between the tower and the house, so the link adds no lightning path. Everything ends up in the same station service and Mac client as remkey.
+
+**The transverter link is read-only.** The tower only ever sends `s` and `v`, which read status, never the configuration commands (`IR`/`IT`/`RR`/`RT`/`D1`–`D4`). A garbled byte can't retune the IF or change the sequencer.
 
 ### Frequency and legality
 
@@ -330,19 +334,22 @@ There is no conductor between the tower and the house, so the link adds no light
 - Packets are plain ASCII with no encryption, and every packet carries your callsign. That keeps the link legal whether you treat it as a Part 15 device or as a Part 97 station.
 - Transmit power defaults to 17 dBm, which is plenty for 200 ft through block. Raise it with `LORA_TX_POWER` if the link is marginal.
 
-### Parts (both ends unless noted)
+### Parts
 
 | Qty | Part | Notes |
 |---|---|---|
 | 2 | Ebyte E220-900T22D | Both ends must be the **900** version |
 | 2 | 915 MHz antenna (SMA) | A whip is fine; a small yagi at the house end if needed |
 | 2 | Arduino Nano | |
-| 6+6 | 1 kΩ and 2 kΩ resistors | 5 V → 3.3 V dividers on M0, M1 and RXD, at each end |
+| 6+6 | 1 kΩ and 2 kΩ resistors | 5 V → 3.3 V dividers on E220 M0, M1 and RXD, at each end |
 | 2 | 100 µF electrolytic | Across the E220 VCC/GND pins (TX current peaks) |
 | 1 | 5 V buck module (MP1584 or similar) + 1 A fuse | Tower: 13.8 V → 5 V |
-| 1 | DS18B20 waterproof probe + 4.7 kΩ resistor | Tower |
+| 1 | AMS1117-3.3 module (or any 3.3 V LDO) | Tower: low-voltage side of the level shifter |
+| 1 | 4-channel BSS138 level-shifter module | Tower: Nano ↔ MKU serial (3.3 V) |
+| 2 | DS18B20 waterproof probes + one 4.7 kΩ resistor | Tower: both on one bus |
 | 2 | 10 kΩ + 22 kΩ resistors, 100 nF caps | Tower: input dividers for A0 and A1 |
-| 1 | 1 kΩ resistor | Tower: LO-lock series resistor |
+| 1 | 100 kΩ resistor | Tower: pull-down on A2 (LD) |
+| — | 2.54 mm female header/jumper wires | Tower: to MKU CON1 |
 | 1 | Weatherproof box with cable glands | Tower |
 
 ### Wiring: E220 to Nano (same at both ends)
@@ -355,29 +362,42 @@ M0   ◄──── 2k ──┬── 1k ──── D9        (each divider:
 M1   ◄──── 2k ──┼── 1k ──── D10                               └─2k─ GND)
 RXD  ◄──── 2k ──┼── 1k ──── D8
             GND ┘
-TXD  ─────────────────────► D7        (3.3 V high is read fine by the Nano)
+TXD  ─────────────────────► D7
 AUX  ─────────────────────► D6
 VCC  ── 5 V ── 100 µF ── GND
 GND  ── GND
 ```
 
-### Wiring: tower Nano
+### Wiring: tower Nano to the MKU 10 G5 and PA
 
 ```
-13.8 V ── 1 A fuse ── buck (set to 5.0 V) ──► Nano 5V pin (not VIN), E220 VCC, DS18B20
-PA sense  ── 10k ──┬── A0      XV sense ── 10k ──┬── A1      (22k and 100 nF to GND
-                   ├─ 22k ─ GND                   ├─ 22k ─ GND  keep 5 V inputs under
-                   └─ 100nF ─ GND                 └─ 100nF ─ GND the ADC ceiling)
-LO lock   ── 1k ── D4    (internal pull-up; works for TTL or open-collector outputs)
-DS18B20   red 5V, black GND, yellow ── D5, 4.7k from D5 to 5V
+13.8 V ── 1 A fuse ── buck (5.0 V) ──► Nano 5V pin (not VIN), E220 VCC, DS18B20s, shifter HV
+                     5.0 V ── AMS1117-3.3 ──► shifter LV
+
+PA sense      ── 10k ──┬── A0       MKU CON1 pin 9 (MON) ── 10k ──┬── A1
+                       ├─ 22k ─ GND                                ├─ 22k ─ GND
+                       └─ 100nF ─ GND                              └─ 100nF ─ GND
+
+MKU CON1 pin 16 (LD) ─────────┬── A2        LD is 3.3 V via 330 Ω when locked; the
+                              └─ 100k ─ GND  pull-down holds A2 low otherwise
+
+MKU CON1 pin 11 (TXD) ── shifter LV1 ═ HV1 ── D11
+MKU CON1 pin 12 (RXD) ── shifter LV2 ═ HV2 ── D12
+MKU CON1 pin 15 (GND) ── GND                (common ground with the Nano)
+
+DS18B20 #1 and #2: red 5V, black GND, both yellow ── D5; one 4.7k from D5 to 5V
 ```
 
-**Configuration notes:**
+**Notes:**
 
-- Set `LOCK_ACTIVE_HIGH` to match your transverter. If its lock output swings higher than 5 V, add a divider.
-- The sense outputs' ground must be common with the Nano's. It is, since everything runs from the transverter supply.
-- Clamp the DS18B20 under a heatsink screw near the PA device, with thermal compound.
-- Measure the buck's 5 V rail with a DMM and enter it as `VREF_MV`. The ADC uses that rail as its reference.
+- **Why analog for LD:** a 5 V Nano needs about 3.0 V to read a digital high, and LD gives only 3.3 V through 330 Ω. That's too close, so A2 compares against 1.65 V instead.
+- **LD tracks the external 10 MHz reference:** it's high only while the MKU is locked to an *external* 10 MHz reference. If you run without one, set `LOCK_MONITOR 0` so it doesn't alarm.
+- **Probes:**
+  - Clamp one DS18B20 under a heatsink screw near the PA device and the other on the MKU housing, both with thermal compound.
+  - The MKU is rated for +55 °C case and disables transmit above +65 °C. The default alert for probe 2 is 50 °C.
+  - Probe order on the bus is fixed by each probe's serial number, not by wiring. Warm one in your hand while watching `tlmview` to see which is which. Then set `temp_names` in `station.toml`, or swap the probes.
+- **ADC reference:** measure the buck's 5 V rail with a DMM and enter it as `VREF_MV`. The ADC uses that rail as its reference.
+- **Command terminator:** if the MKU doesn't answer `s`, it may want a line terminator. Set `XV_CMD_SUFFIX "\r"` in `config.h`.
 
 ### Wiring: base Nano (radio room)
 
@@ -387,45 +407,48 @@ Only the E220 block above, plus USB to the shack PC. Put the module and its ante
 
 1. In the Arduino IDE, install **EByte LoRa E220 library** (Renzo Mischianti), **OneWire** and **DallasTemperature**.
 2. Open `firmware/remtlm/remtlm.ino`, set `REMTLM_ROLE` in `config.h`, and upload the TOWER image to one Nano and the BASE image to the other. Alternatively, run `pio run -e tower` / `-e base` from `firmware/remtlm`.
-3. At boot, each Nano prints `V:remtlm 0.1.0 tower|base`, then `C:ok ch=77 freq_khz=927125`. The first boot also prints `C:written`, since it writes the settings to the module once.
-   - `C:ERR read config` means it can't talk to the module: check the M0, M1 and AUX wiring and the module's power.
-4. The tower Nano echoes every packet on its own USB port, so you can watch it on the bench.
-5. The base Nano prints only valid packets: `$RT,...*HH`.
+3. At boot, each Nano prints `V:remtlm 0.2.0 tower|base`, then `C:ok ch=77 freq_khz=927125`. The first boot also prints `C:written`, since it writes the settings to the module once.
+   - `C:ERR read config` means the Nano can't talk to the module: check the M0, M1 and AUX wiring and the module's power.
+4. The tower also prints `I:temperature probes=2`.
+5. The tower echoes every packet on its own USB port, so you can watch it on the bench:
+   - `$RT,...` readings
+   - `$RK,...` transverter replies; the first, about 5 s after boot, is the `v` reply
+6. The base Nano prints only valid packets.
 
 ### Shack configuration
 
 In `station.toml`, set `tlm_port` to the base Nano's COM port. Then:
 
-- **Ctrl-P** in the client prints the tower readings.
-- **Ctrl-G** includes them.
+- **Ctrl-P** in the client prints the tower readings. **Ctrl-G** includes them.
+- **Ctrl-K** prints the MKU's latest `s` status and its firmware version.
 - **Alerts** print on their own lines (`!!` = warning, `--` = cleared):
-  - LO unlock
-  - heatsink at or above `temp_warn_c`
+  - 10 MHz reference unlock
+  - either probe at or above its limit (`temp_warn_c`, `temp2_warn_c`)
   - no packets for `tlm_stale_s`
 - **TX summary:** when you drop PTT, the client prints `last TX: PA peak … W`.
-- **CSV log:** every packet is also logged to `remkey-tlm.csv`, which gives you heatsink temperature history.
+- **CSV log:** every reading is also logged to `remkey-tlm.csv`, which gives you temperature history for both probes. The station log records each transverter reply.
 
 ### Calibrating the PA power sense
 
-Detector outputs aren't linear in power, so remkey uses a table you measure:
+Detector outputs aren't linear in power (Kuhne says the same of MON), so remkey uses a table you measure:
 
 1. Put a power meter (through a suitable attenuator) on the PA output. On the bench before installation is easiest.
 2. Run `python -m remkey.tlmview --port <tower Nano port>` and key a carrier (Ctrl-U tune, or locally) at several drive levels.
 3. For each level, note the meter's watts and the `PA pk` mV reading.
 4. Enter the pairs in `station.toml` as `pa_cal = [[mV, W], ...]`. Four or five points spanning low to full power are plenty.
-5. Do the same for `xv_cal` if you want the transverter's output in watts too.
+5. Do the same with the MKU's output for `xv_cal` if you want MON in watts too.
 
 Until a table is entered, readings are shown in mV.
 
-### Later: transverter serial control
+### Parsing the MKU status
 
-The transverter's serial control interface isn't used yet. The tower Nano's hardware UART is free when USB isn't connected, so reading the transverter's own status (or controlling it) from the shack is a natural next step once its protocol is known.
+The manual lists what `s` reports (sequencer delays, frequency settings, reference PLL state) but not the reply's exact format, so it is relayed and displayed as-is. Once you've captured a real reply (Ctrl-K, `tlmview`, or the station log), its fields can be parsed so that, for example, a reference-PLL problem raises an alert from the serial status as well as from LD.
 
 ## Protocol reference
 
 - Network protocol: JSON lines over TCP, documented in `host/remkey/protocol.py`.
 - Serial protocol: newline-terminated commands at 115200 baud, documented at the top of `firmware/remkey/remkey.ino`.
-- Telemetry packet: `$RT,seq,pa_pk_mv,pa_avg_mv,xv_pk_mv,lock,temp_c10,uptime_s,call*HH`, documented in `firmware/remtlm/tlm_proto.h`.
+- Telemetry packets: `$RT,...` readings and `$RK,...` transverter replies, documented in `firmware/remtlm/tlm_proto.h`.
 
 ## License
 
