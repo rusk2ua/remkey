@@ -23,7 +23,7 @@ The E220 modules usually ship from China and are the slowest item, so order earl
 - [ ] 1× AMS1117-3.3 module
 - [ ] 1× MP1584 (or similar) 5 V buck module and a 1 A fuse
 - [ ] 1× INA226 module (e.g. CJMCU-226)
-- [ ] 1× 2 mΩ current shunt, 1%, ≥ 2 W
+- [x] 1× 20 A / 75 mV panel-meter shunt (3.75 mΩ): ordered
 - [ ] Weatherproof box with cable glands
 - [ ] 4× Nanos, resistors (1 k, 2 k, 4.7 k, 10 k, 22 k, 100 k, 470 Ω), 100 nF and 100 µF caps (likely on hand)
 
@@ -113,7 +113,8 @@ the paddle at the radio, and N1MM+ is unaffected.
 - [ ] MKU on the bench: LD reads locked/unlocked correctly (or `LOCK_MONITOR 0` if no external 10 MHz reference)
 - [ ] MKU serial via the level shifter: `v` and `s` replies arrive (else set `XV_CMD_SUFFIX "\r"`)
 - [ ] Capture an `s` reply and send it over for parsing / serial reference-PLL alert
-- [ ] INA226: remove the module's R100 (or set `SHUNT_UOHM 1961`); wire the 2 mΩ shunt with Kelvin sense leads
+- [ ] INA226: remove the module's R100 (or set `SHUNT_UOHM 3614`)
+- [ ] Shunt: heavy leads on the bolts, IN+ / IN- on the sense screws (IN+ supply side); shunt insulated from the enclosure
 - [ ] Tower prints `I:INA226 ok`; `tlmview` shows supply voltage and current
 - [ ] Bench supply plus a load (power resistor or the transverter): voltage matches a DMM, current matches a meter in series; set `v_scale` / `i_scale`
 - [ ] Reverse-polarity check: current reads positive with the load on the IN- side

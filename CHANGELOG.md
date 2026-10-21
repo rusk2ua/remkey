@@ -16,6 +16,7 @@ firmware and the remtlm telemetry firmware each carry their own version.
   with a wire-gauge check.
 - `python -m remkey.powerstats`: receive/transmit supply statistics from the CSV
   log and suggested alert limits.
+- Default shunt is a 20 A / 75 mV panel-meter shunt (`SHUNT_UOHM 3750`, 21.8 A full scale).
 
 ### Fixes
 - remkey firmware: keyer enums moved to `keyer_types.h` so the Arduino build's

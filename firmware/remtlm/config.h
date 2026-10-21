@@ -79,15 +79,17 @@
 // ---------------------------------------------------------------------------
 // Tower supply monitor: INA226 on I2C with a high-side shunt in the 13.8 V feed
 // at the enclosure entry, ahead of everything in the box.
-//   SHUNT_UOHM: shunt resistance in micro-ohms. 2000 = 2 milliohm, which gives
-//               1.25 mA resolution and 40.9 A full scale (the INA226 tops out at
-//               81.92 mV across the shunt). If you leave a CJMCU-226 module's own
-//               R100 in place, the pair measures 1961 uOhm: set 1961.
+//   SHUNT_UOHM: shunt resistance in micro-ohms. The INA226 reads at most 81.92 mV
+//               across the shunt, so this sets the full-scale current.
+//               3750 = 20 A / 75 mV panel-meter shunt: 21.8 A full scale, 0.67 mA steps.
+//               Other common values: 5000 (5 mOhm, 16.4 A), 2000 (2 mOhm, 41 A).
+//               Remove a CJMCU-226 module's own R100 shunt: left in parallel with
+//               the 3.75 mOhm shunt it reads 3.6% low (or set 3614).
 //   Trim small gain errors against a DMM with v_scale / i_scale in station.toml.
 // ---------------------------------------------------------------------------
 #define PWR_ENABLE       1
 #define INA226_ADDR      0x40     // A0 and A1 address pins to GND
-#define SHUNT_UOHM       2000L
+#define SHUNT_UOHM       3750L    // 20 A / 75 mV panel shunt
 #define PWR_SAMPLE_MS    10UL     // the INA226 produces a new averaged reading every 8.8 ms
 #define PWR_RETRY_MS     5000UL   // re-initialise this often if the INA226 stops answering
 

@@ -369,7 +369,7 @@ There is no conductor between the tower and the house, so the link adds no light
 | 1 | 100 kΩ resistor | Tower: pull-down on A2 (LD) |
 | — | 2.54 mm female header/jumper wires | Tower: to MKU CON1 |
 | 1 | INA226 module (e.g. CJMCU-226) | Tower: supply monitor, I2C address 0x40 |
-| 1 | 2 mΩ current shunt, 1%, ≥ 2 W | Tower: in the + feed (see below) |
+| 1 | 20 A / 75 mV panel-meter shunt (3.75 mΩ) | Tower: in the + feed (see below) |
 | 1 | Weatherproof box with cable glands | Tower |
 
 ### Wiring: E220 to Nano (same at both ends)
@@ -409,11 +409,12 @@ DS18B20 #1 and #2: red 5V, black GND, both yellow ── D5; one 4.7k from D5 to
 
 INA226 module: VCC ── 5V, GND ── GND, SDA ── A4, SCL ── A5   (A0/A1 address pins to GND)
 
-         from tower cable (+)                            to everything in the box
- +13.8 ════════════╦═══════[ 2 mΩ shunt ]═══════╦═════► MKU, PA, relays, fuse, buck
-                   ║                            ║
-                IN+ (sense)                 IN- (sense) ── also VBUS on modules that
-                                                           have a separate VBUS pin
+ from tower cable (+)        20 A / 75 mV shunt            to everything in the box
+ +13.8 ══════════► [big bolt]══════════════════[big bolt] ══════► MKU, PA, relays, fuse, buck
+                   (sense screw)            (sense screw)
+                        │                         │
+                       IN+                       IN- ── also VBUS on modules that
+                                                        have a separate VBUS pin
 ```
 
 **Notes:**
@@ -430,9 +431,11 @@ INA226 module: VCC ── 5V, GND ── GND, SDA ── A4, SCL ── A5   (A0
 **Supply monitor notes:**
 
 - **Put the shunt at the enclosure entry,** ahead of everything, including the tower Nano's own buck converter. Then it measures the total current the tower draws.
-- **Use Kelvin connections.** The heavy current flows through the shunt's main terminals; IN+ and IN- go to the shunt's own sense terminals (or right at the shunt body) on light wires. Don't take them from the far ends of the heavy wiring.
-- **Range:** with 2 mΩ the INA226 reads up to 40.9 A in 1.25 mA steps, and the shunt drops only 8 mV and dissipates 32 mW at 4 A.
-- **CJMCU-226 modules have their own 0.1 Ω shunt (R100) on the board.** Remove it before wiring the external shunt. If you leave it in place, the pair measures 1.961 mΩ: set `SHUNT_UOHM 1961` in `config.h`.
+- **Heavy wires go on the big bolts; IN+ and IN- go on the small sense screws.** The sense screws give you a Kelvin connection: they measure the shunt element itself, not the resistance of the bolted joints. IN+ goes on the supply side, IN- on the load side.
+- **The whole shunt sits at +13.8 V.** Mount it on its insulating base or on standoffs, clear of the metal enclosure, and cover the terminals.
+- **Range:** with 3.75 mΩ the INA226 reads up to 21.8 A in 0.67 mA steps. At 4 A the shunt drops 15 mV and dissipates 60 mW; at 8 A, 30 mV and 0.24 W. Panel shunts run cool well below their rating.
+- **`SHUNT_UOHM` is 3750 by default.** A different shunt needs only that value changed: millivolt rating ÷ amp rating, in µΩ (75 mV / 20 A = 3750).
+- **CJMCU-226 modules have their own 0.1 Ω shunt (R100) on the board.** Remove it. Left in parallel with the panel shunt it makes readings 3.6% low (or set `SHUNT_UOHM 3614`).
 - **The bus voltage is read on the load side of the shunt,** which is the voltage your equipment actually sees. On modules with a separate VBUS pin, tie it to IN-.
 - **Negative current means the shunt is wired backwards.** It is reported as-is, not hidden.
 - **Trim to your meters:** compare against a DMM at the enclosure and a clamp meter, then set `v_scale` and `i_scale` in `station.toml`. No reflash needed.
