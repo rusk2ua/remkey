@@ -56,6 +56,7 @@ host/remkey/client.py          travel client (macOS; Linux works too)
 host/remkey/protocol.py        network protocol, CW text sanitiser
 host/remkey/telemetry.py       remtlm packet parsing, calibration, link statistics
 host/remkey/tlmview.py         bench viewer for calibrating the PA power sense
+host/remkey/powerstats.py      tower supply statistics from the CSV log; suggested alert limits
 host/*.example.toml            config templates
 host/tests/                    pytest: protocol, end-to-end over localhost, telemetry
 tests/firmware_sim/            g++ simulation of the sketch (timing, decoder, watchdog)
@@ -243,6 +244,7 @@ This requires an AnyDesk plan that includes TCP tunneling.
 | **Ctrl-G** | Status: link, PTT, WPM, round-trip time (plus tower telemetry if fitted) |
 | **Ctrl-P** | Tower: PA power, transverter power, temperatures, 10 MHz reference lock |
 | **Ctrl-K** | Tower: Kuhne MKU 10 G5 status (`s`) and firmware version (`v`) |
+| **Ctrl-V** | Tower: supply voltage and current, measured cable resistance and drop |
 | **Ctrl-Q / Ctrl-C** | Quit. PTT is dropped first. |
 | Typing | Sent as CW. Enter sends a space. `<SK>`, `<AR>`, `<BT>`, `<KN>` send prosigns. |
 
@@ -311,8 +313,8 @@ Every firmware image builds with no warnings in the project's own files (`arduin
 | Image | Flash | Static RAM |
 |---|---|---|
 | remkey client / station | 7.9 KB of 30 KB | 541 B of 2 KB |
-| remtlm tower | 15.2 KB | 774 B |
-| remtlm base | 7.3 KB | 446 B |
+| remtlm tower | 18.8 KB | 1056 B |
+| remtlm base | 7.4 KB | 450 B |
 
 Library versions used in CI: EByte LoRa E220 library 1.0.8, OneWire 2.3.8, DallasTemperature 4.0.6.
 
@@ -325,6 +327,7 @@ A second pair of Nanos brings tower-top readings into the radio room over a LoRa
 - **10 MHz reference lock** from the MKU's LD output (CON1 pin 16); any unlock during a reporting interval is reported
 - **Two DS18B20 probes**: PA heatsink and MKU case
 - **The MKU's serial status**: the `v` (firmware) reply once after boot, then the `s` (status) reply every minute, relayed verbatim
+- **Supply voltage and current** at the enclosure, from an INA226 and a shunt in the 13.8 V feed. From these the station service also works out the **cable's actual resistance** and the voltage the supply is holding at the tower base (see "Supply voltage, current and cable drop" below).
 
 ```
  TOWER TOP (13.8 V supply)                                  RADIO ROOM
@@ -333,7 +336,8 @@ A second pair of Nanos brings tower-top readings into the radio room over a LoRa
 │ MKU pin 9 MON ────► A1 │                  │    MHz     │  validates packets   station  │
 │ MKU pin 16 LD ────► A2 ├─ TOWER ─► E220 ~~~~~~~~~~~~~~►│                      service  │
 │ DS18B20 ×2 ───────► D5 │   Nano           │    LoRa    │  ─► client: Ctrl-P, Ctrl-K,   │
-│ MKU pins 11/12 ◄──► D11/D12 (via shifter)│            │     alerts, TX peak summary   │
+│ MKU pins 11/12 ◄──► D11/D12 (via shifter)│            │     Ctrl-V, alerts, TX summary│
+│ INA226 + shunt ───► A4/A5 (I2C)          │            │                              │
 └──────────────────────────────────────────┘            └──────────────────────────────┘
 ```
 
@@ -344,7 +348,8 @@ There is no conductor between the tower and the house, so the link adds no light
 ### Frequency and legality
 
 - The link runs on **927.125 MHz** (E220-900T22D channel 77, set by `LORA_CHANNEL` in `firmware/remtlm/config.h`). That's the top of the US 902–928 MHz band and about 24 MHz clear of 902–903 weak-signal work.
-- Packets are plain ASCII with no encryption, and every packet carries your callsign. That keeps the link legal whether you treat it as a Part 15 device or as a Part 97 station.
+- Treat the link as part of your **amateur station (Part 97)**. 927 MHz is in the 33 cm band, the packets are plain ASCII with no encryption, every packet carries your callsign, and §97.221(b) allows automatic control of data emissions on 6 m and shorter. It is *not* a Part 15 device in this configuration: a single-channel module at 17 dBm doesn't fit the unlicensed rules.
+- Airtime: roughly 60–70 ms per packet at the 9.6 kbps air rate. Two packets (`$RP` and `$RT`) go out every 2 s while idle and every 0.5 s while the PA shows output.
 - Transmit power defaults to 17 dBm, which is plenty for 200 ft through block. Raise it with `LORA_TX_POWER` if the link is marginal.
 
 ### Parts
@@ -363,6 +368,8 @@ There is no conductor between the tower and the house, so the link adds no light
 | 2 | 10 kΩ + 22 kΩ resistors, 100 nF caps | Tower: input dividers for A0 and A1 |
 | 1 | 100 kΩ resistor | Tower: pull-down on A2 (LD) |
 | — | 2.54 mm female header/jumper wires | Tower: to MKU CON1 |
+| 1 | INA226 module (e.g. CJMCU-226) | Tower: supply monitor, I2C address 0x40 |
+| 1 | 2 mΩ current shunt, 1%, ≥ 2 W | Tower: in the + feed (see below) |
 | 1 | Weatherproof box with cable glands | Tower |
 
 ### Wiring: E220 to Nano (same at both ends)
@@ -399,6 +406,14 @@ MKU CON1 pin 12 (RXD) ── shifter LV2 ═ HV2 ── D12
 MKU CON1 pin 15 (GND) ── GND                (common ground with the Nano)
 
 DS18B20 #1 and #2: red 5V, black GND, both yellow ── D5; one 4.7k from D5 to 5V
+
+INA226 module: VCC ── 5V, GND ── GND, SDA ── A4, SCL ── A5   (A0/A1 address pins to GND)
+
+         from tower cable (+)                            to everything in the box
+ +13.8 ════════════╦═══════[ 2 mΩ shunt ]═══════╦═════► MKU, PA, relays, fuse, buck
+                   ║                            ║
+                IN+ (sense)                 IN- (sense) ── also VBUS on modules that
+                                                           have a separate VBUS pin
 ```
 
 **Notes:**
@@ -412,6 +427,16 @@ DS18B20 #1 and #2: red 5V, black GND, both yellow ── D5; one 4.7k from D5 to
 - **ADC reference:** measure the buck's 5 V rail with a DMM and enter it as `VREF_MV`. The ADC uses that rail as its reference.
 - **Command terminator:** if the MKU doesn't answer `s`, it may want a line terminator. Set `XV_CMD_SUFFIX "\r"` in `config.h`.
 
+**Supply monitor notes:**
+
+- **Put the shunt at the enclosure entry,** ahead of everything, including the tower Nano's own buck converter. Then it measures the total current the tower draws.
+- **Use Kelvin connections.** The heavy current flows through the shunt's main terminals; IN+ and IN- go to the shunt's own sense terminals (or right at the shunt body) on light wires. Don't take them from the far ends of the heavy wiring.
+- **Range:** with 2 mΩ the INA226 reads up to 40.9 A in 1.25 mA steps, and the shunt drops only 8 mV and dissipates 32 mW at 4 A.
+- **CJMCU-226 modules have their own 0.1 Ω shunt (R100) on the board.** Remove it before wiring the external shunt. If you leave it in place, the pair measures 1.961 mΩ: set `SHUNT_UOHM 1961` in `config.h`.
+- **The bus voltage is read on the load side of the shunt,** which is the voltage your equipment actually sees. On modules with a separate VBUS pin, tie it to IN-.
+- **Negative current means the shunt is wired backwards.** It is reported as-is, not hidden.
+- **Trim to your meters:** compare against a DMM at the enclosure and a clamp meter, then set `v_scale` and `i_scale` in `station.toml`. No reflash needed.
+
 ### Wiring: base Nano (radio room)
 
 Only the E220 block above, plus USB to the shack PC. Put the module and its antenna where it has the best view of the tower, for example a window. A USB extension cable is fine.
@@ -420,9 +445,9 @@ Only the E220 block above, plus USB to the shack PC. Put the module and its ante
 
 1. In the Arduino IDE, install **EByte LoRa E220 library** (Renzo Mischianti), **OneWire** and **DallasTemperature**. CI builds with versions 1.0.8, 2.3.8 and 4.0.6.
 2. Open `firmware/remtlm/remtlm.ino`, set `REMTLM_ROLE` in `config.h`, and upload the TOWER image to one Nano and the BASE image to the other. Alternatively, run `pio run -e tower` / `-e base` from `firmware/remtlm`.
-3. At boot, each Nano prints `V:remtlm 0.2.0 tower|base`, then `C:ok ch=77 freq_khz=927125`. The first boot also prints `C:written`, since it writes the settings to the module once.
+3. At boot, each Nano prints `V:remtlm 0.3.0 tower|base`, then `C:ok ch=77 freq_khz=927125`. The first boot also prints `C:written`, since it writes the settings to the module once.
    - `C:ERR read config` means the Nano can't talk to the module: check the M0, M1 and AUX wiring and the module's power.
-4. The tower also prints `I:temperature probes=2`.
+4. The tower also prints `I:temperature probes=2` and `I:INA226 ok`. `I:INA226 not found` means the I2C wiring or address is wrong; the tower keeps working and retries every 5 s.
 5. The tower echoes every packet on its own USB port, so you can watch it on the bench:
    - `$RT,...` readings
    - `$RK,...` transverter replies; the first, about 5 s after boot, is the `v` reply
@@ -434,12 +459,48 @@ In `station.toml`, set `tlm_port` to the base Nano's COM port. Then:
 
 - **Ctrl-P** in the client prints the tower readings. **Ctrl-G** includes them.
 - **Ctrl-K** prints the MKU's latest `s` status and its firmware version.
+- **Ctrl-V** prints the tower supply voltage and current, the measured cable resistance, and the cable drop now and at peak current. Ctrl-P and Ctrl-G include a one-line supply summary.
 - **Alerts** print on their own lines (`!!` = warning, `--` = cleared):
   - 10 MHz reference unlock
   - either probe at or above its limit (`temp_warn_c`, `temp2_warn_c`)
   - no packets for `tlm_stale_s`
-- **TX summary:** when you drop PTT, the client prints `last TX: PA peak … W`.
-- **CSV log:** every reading is also logged to `remkey-tlm.csv`, which gives you temperature history for both probes. The station log records each transverter reply.
+  - tower supply below `v_min_alert` or above `v_max_alert`, current above `i_max_alert` or below `i_min_alert`, or the INA226 not answering
+- **TX summary:** when you drop PTT, the client prints `last TX: PA peak … W | supply min … V, peak … A`.
+- **CSV log:** every reading is also logged to `remkey-tlm.csv`, which gives you temperature, voltage and current history. The station log records each transverter reply.
+
+### Supply voltage, current and cable drop
+
+**What to expect.** Copper loop resistance for your 100 ft run (both conductors, 200 ft total, at 20 °C):
+
+| Cable | Loop resistance | Drop at 4 A | Drop at 6 A | Drop at 8 A | Top voltage at 4 A (14.1 V at base) |
+|---|---|---|---|---|---|
+| #10 | 0.200 Ω | 0.80 V | 1.20 V | 1.60 V | 13.30 V |
+| #12 | 0.318 Ω | 1.27 V | 1.91 V | 2.54 V | 12.83 V |
+
+Connectors, the fuse and crimps add to that, and copper rises 0.39% per °C, about 8% between a winter and a summer day. The MKU 10 G5 is rated for 12–14 V. With #12, transmit current much above 6 A pulls the top of the tower below 12 V, which the alerts will catch.
+
+**How the cable is measured.** You don't need to know the exact supply voltage. Every reporting interval gives an average current and voltage at the enclosure, and they always lie on one straight line: *V = V_supply − R × I*. As your current moves between receive and transmit, the station service fits that line and gets two numbers:
+
+- **R:** the total resistance between the supply and the enclosure, cable plus connectors.
+- **V_supply:** the voltage the supply is actually holding at the tower base. Compare it with the 14.1 V you set.
+
+**Ctrl-V** shows both, plus which wire gauge R matches. If R is well above the #10 or #12 figure, look at connectors, crimps and the fuse holder before suspecting the wire. The fit needs at least 20 readings covering at least 0.5 A of current spread, which a few minutes of transmitting provides.
+
+**Finding the normal range.** Leave the alert limits for current at 0 (off) and operate normally for a few days, including some transmitting. Then run:
+
+```
+python -m remkey.powerstats remkey-tlm.csv --config station.toml
+```
+
+It separates receive and transmit periods using the PA power sense, then prints:
+
+- voltage and current ranges for each
+- the cable fit
+- suggested `v_min_alert`, `v_max_alert`, `i_max_alert` and `i_min_alert` values to paste into `station.toml`
+
+A useful `i_min_alert` (current well below normal) catches something in the box losing power, for example the PA's fuse.
+
+**If the drop turns out to be too large,** the options are heavier cable, raising the supply at the base (keeping the top under 14 V at receive current), or a supply with remote-sense terminals wired to the enclosure.
 
 ### Calibrating the PA power sense
 

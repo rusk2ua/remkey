@@ -11,6 +11,7 @@ Hotkeys (terminal):
     Ctrl-F  faster (+1 WPM)       Ctrl-S  slower (-1 WPM)
     Ctrl-G  status / RTT          Ctrl-P  tower PA power, temperatures, ref lock
     Ctrl-K  transverter (Kuhne) status and firmware version
+    Ctrl-V  tower supply voltage/current and measured cable resistance
     Ctrl-Q or Ctrl-C  quit
     Any other printable key is sent as CW; Enter sends a space.
     Type <SK>, <AR>, <BT>, <KN> for prosigns.
@@ -36,7 +37,7 @@ ESC = "\x1b"
 
 HOTKEY_HELP = (
     "Ctrl-T PTT | Ctrl-U tune | Esc abort | Ctrl-F/Ctrl-S speed | Ctrl-G status"
-    " | Ctrl-P PA | Ctrl-K XV | Ctrl-Q quit"
+    " | Ctrl-P PA | Ctrl-K XV | Ctrl-V supply | Ctrl-Q quit"
 )
 
 
@@ -74,6 +75,8 @@ class ClientApp:
         self._typed = ""     # buffer for <PROSIGN> typing
         self.tlm: dict | None = None
         self._tx_peak: tuple | None = None   # (watts or None, mV) peak during this PTT
+        self.pwr: dict | None = None
+        self._tx_pwr: tuple | None = None    # (lowest V, highest A) during this PTT
         link.set_handler(self.on_keyer_line)
 
     # ------------------------------------------------------------ outbound
@@ -131,6 +134,38 @@ class ClientApp:
         )
         if self.tlm:
             self.console.event(self.tlm_line(self.tlm))
+        if self.pwr and self.pwr.get("ok"):
+            self.console.event(self.pwr_line(self.pwr))
+
+    @staticmethod
+    def pwr_line(m: dict) -> str:
+        return (f"tower supply: {m['v_avg']:.2f} V (min {m['v_min']:.2f}) | {m['i_avg']:.2f} A"
+                f" (peak {m['i_max']:.2f}) | {m['drop_v']:.2f} V below the {m['base_v']:.2f} V supply")
+
+    def show_pwr_detail(self, m: dict) -> None:
+        if m.get("none"):
+            self.console.event("no tower supply readings yet")
+            return
+        if not m.get("ok"):
+            self.console.event("tower supply monitor (INA226) is not answering")
+            return
+        self.console.event(self.pwr_line(m) + f" ({m.get('age_s')} s old)")
+        fit = m.get("fit")
+        if not fit:
+            n = m.get("fit_points", 0)
+            self.console.event(f"   cable resistance: not enough data yet ({n} readings; needs 20+"
+                               " spanning at least 0.5 A, so transmit for a while)")
+            return
+        self.console.event(
+            f"   cable loop resistance {fit['r_ohm'] * 1000:.0f} mOhm from {fit['n']} readings"
+            f" ({fit['i_lo']:.2f}-{fit['i_hi']:.2f} A, fit rms {fit['rms_mv']:.0f} mV)")
+        self.console.event(
+            f"   {fit['verdict']} ({fit['expected_r'] * 1000:.0f} mOhm for"
+            f" 2 x {fit['one_way_ft']:.0f} ft at 20 C)")
+        self.console.event(
+            f"   supply holding {fit['v_source']:.2f} V at the base; cable drop is"
+            f" {fit['r_ohm'] * m['i_avg']:.2f} V now,"
+            f" {fit['r_ohm'] * m['i_max']:.2f} V at {m['i_max']:.2f} A")
 
     @staticmethod
     def _power(w, mv) -> str:
@@ -205,6 +240,12 @@ class ClientApp:
             elif key == "K":
                 if not self._send({"t": "xvq"}):
                     self.console.event("transverter status needs the station link")
+            elif key == "V":
+                if not self._send({"t": "pwrq"}):
+                    if self.pwr:
+                        self.console.event(self.pwr_line(self.pwr) + " (cached)")
+                    else:
+                        self.console.event("tower supply needs the station link")
             elif key in ("Q", "C"):
                 self.quit.set()
             return
@@ -268,6 +309,7 @@ class ClientApp:
                 self.console.event(f"STATION PTT {'ON' if self.station_ptt else 'off'}")
                 if self.station_ptt:
                     self._tx_peak = None
+                    self._tx_pwr = None
                 else:
                     self._report_tx()
         elif t == "hb":
@@ -284,6 +326,20 @@ class ClientApp:
                     self._tx_peak = (w, mv)
             if "age_s" in msg:          # reply to Ctrl-P
                 self.console.event(self.tlm_line(msg))
+                if self.pwr and self.pwr.get("ok"):
+                    self.console.event(self.pwr_line(self.pwr))
+        elif t == "pwr":
+            if msg.get("query"):
+                self.show_pwr_detail(msg)
+            if msg.get("none"):
+                return
+            self.pwr = msg
+            if self.station_ptt and msg.get("ok"):
+                v, i = msg["v_min"], msg["i_max"]
+                if self._tx_pwr is None:
+                    self._tx_pwr = (v, i)
+                else:
+                    self._tx_pwr = (min(v, self._tx_pwr[0]), max(i, self._tx_pwr[1]))
         elif t == "xvstat":
             if msg.get("query"):
                 if msg.get("version"):
@@ -303,10 +359,17 @@ class ClientApp:
             self.console.event(f"station: {msg.get('msg')}")
 
     def _report_tx(self) -> None:
+        parts = []
         if self._tx_peak is not None:
             w, mv = self._tx_peak
-            self.console.event(f"last TX: PA peak {self._power(w, mv)}")
+            parts.append(f"PA peak {self._power(w, mv)}")
+        if self._tx_pwr is not None:
+            v, i = self._tx_pwr
+            parts.append(f"supply min {v:.2f} V, peak {i:.2f} A")
+        if parts:
+            self.console.event("last TX: " + " | ".join(parts))
         self._tx_peak = None
+        self._tx_pwr = None
 
     def _on_disconnect(self) -> None:
         self.connected = False

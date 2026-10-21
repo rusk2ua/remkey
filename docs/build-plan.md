@@ -22,6 +22,8 @@ The E220 modules usually ship from China and are the slowest item, so order earl
 - [ ] 1× BSS138 4-channel level shifter
 - [ ] 1× AMS1117-3.3 module
 - [ ] 1× MP1584 (or similar) 5 V buck module and a 1 A fuse
+- [ ] 1× INA226 module (e.g. CJMCU-226)
+- [ ] 1× 2 mΩ current shunt, 1%, ≥ 2 W
 - [ ] Weatherproof box with cable glands
 - [ ] 4× Nanos, resistors (1 k, 2 k, 4.7 k, 10 k, 22 k, 100 k, 470 Ω), 100 nF and 100 µF caps (likely on hand)
 
@@ -111,6 +113,10 @@ the paddle at the radio, and N1MM+ is unaffected.
 - [ ] MKU on the bench: LD reads locked/unlocked correctly (or `LOCK_MONITOR 0` if no external 10 MHz reference)
 - [ ] MKU serial via the level shifter: `v` and `s` replies arrive (else set `XV_CMD_SUFFIX "\r"`)
 - [ ] Capture an `s` reply and send it over for parsing / serial reference-PLL alert
+- [ ] INA226: remove the module's R100 (or set `SHUNT_UOHM 1961`); wire the 2 mΩ shunt with Kelvin sense leads
+- [ ] Tower prints `I:INA226 ok`; `tlmview` shows supply voltage and current
+- [ ] Bench supply plus a load (power resistor or the transverter): voltage matches a DMM, current matches a meter in series; set `v_scale` / `i_scale`
+- [ ] Reverse-polarity check: current reads positive with the load on the IN- side
 
 **Done when:** `tlmview` shows sensible readings, both temperatures, lock state and the
 MKU's replies, with near-zero packet loss on the bench.
@@ -147,7 +153,11 @@ MKU's replies, with near-zero packet loss on the bench.
 - [ ] Range test through the block wall: packet loss over one hour: ________ %
 - [ ] Step `LORA_TX_POWER` down to the lowest setting with under ~1% loss: ________
 - [ ] Long carrier: heatsink and case temperatures noted; thresholds adjusted if needed
-- [ ] Alerts tested: unplug a probe, interrupt the 10 MHz reference, power-cycle the tower Nano
+- [ ] Shunt and INA226 at the enclosure entry, ahead of everything in the box
+- [ ] Ctrl-V: tower voltage at receive current: ________ V at ________ A
+- [ ] Ctrl-V after some transmitting: cable loop resistance ________ mΩ (#10 ≈ 200, #12 ≈ 318), supply holding ________ V at the base
+- [ ] Lowest tower voltage on transmit stays above 12.0 V (MKU rating): lowest seen ________ V
+- [ ] Alerts tested: unplug a probe, interrupt the 10 MHz reference, power-cycle the tower Nano, unplug the INA226
 
 **Done when:** the link holds overnight with negligible loss, and alerts fire correctly.
 
@@ -159,6 +169,7 @@ MKU's replies, with near-zero packet loss on the bench.
 - [ ] Shack PC power plan: never sleep; USB selective suspend off
 - [ ] Two-week soak in normal use
 - [ ] Review `remkey-station.log` and `remkey-tlm.csv` for drops, watchdog events, temperature trends
+- [ ] Run `python -m remkey.powerstats remkey-tlm.csv --config station.toml`; set `i_max_alert`, `i_min_alert` and `v_min_alert` from its suggestions
 - [ ] README updated with real-hardware notes (PTT pin used, KEY polarity, sequencer wait, wiring changes)
 - [ ] Remove the "not yet run on real hardware" status note from the README
 - [ ] Tag v1.0

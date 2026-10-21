@@ -14,6 +14,13 @@
 //   uptime_s   tower Nano uptime in seconds (shows resets / brown-outs)
 //   call       station callsign, so every transmission is identified
 //
+// Supply monitor, sent just before the $RT with the same seq (same interval):
+//   $RP,<seq>,<v_avg_mv>,<v_min_mv>,<v_max_mv>,<i_avg_ma>,<i_min_ma>,<i_max_ma>,<ok>,<call>*HH
+//
+//   v_*_mv     supply voltage at the tower enclosure (INA226 bus voltage), mV
+//   i_*_ma     supply current through the shunt, mA (negative = shunt wired backwards)
+//   ok         1 = INA226 answered for the whole interval, 0 = not (values are 0)
+//
 // Transverter serial replies (Kuhne "s" status / "v" version), relayed verbatim:
 //   $RK,<id>,<cmd>,<part>,<total>,<text>,<call>*HH
 //
@@ -34,6 +41,14 @@
 #define TLM_MAX_LINE  80
 #define TLM_RK_TEXT   48      // reply text per $RK packet
 #define TLM_RK_LINE   (TLM_RK_TEXT + 40)
+
+struct PwrData {
+  uint16_t seq;
+  uint16_t vAvgMv, vMinMv, vMaxMv;
+  int32_t  iAvgMa, iMinMa, iMaxMa;
+  uint8_t  ok;
+  const char *call;
+};
 
 struct TlmData {
   uint16_t seq;
@@ -71,6 +86,16 @@ static inline int tlmFormat(char *buf, size_t len, const TlmData *d) {
   return tlmSeal(buf, len, n);
 }
 
+// Writes a complete $RP line including "\r\n". Returns its length, or 0.
+static inline int tlmFormatPower(char *buf, size_t len, const PwrData *d) {
+  int n = snprintf(buf, len, "$RP,%u,%u,%u,%u,%ld,%ld,%ld,%u,%s",
+                   (unsigned)d->seq, (unsigned)d->vAvgMv, (unsigned)d->vMinMv,
+                   (unsigned)d->vMaxMv, (long)d->iAvgMa, (long)d->iMinMa, (long)d->iMaxMa,
+                   (unsigned)d->ok, d->call);
+  if (n <= 0 || (size_t)n >= len) return 0;
+  return tlmSeal(buf, len, n);
+}
+
 // Writes one $RK line for text[0..textLen). Text must already be sanitised.
 static inline int tlmFormatReply(char *buf, size_t len, uint8_t id, char cmd, uint8_t part,
                                  uint8_t total, const char *text, size_t textLen,
@@ -103,7 +128,8 @@ static inline int tlmHexNibble(char c) {
 static inline bool tlmValid(const char *line) {
   size_t n = strlen(line);
   if (n < 8 || line[0] != '$') return false;
-  if (strncmp(line, "$RT,", 4) != 0 && strncmp(line, "$RK,", 4) != 0) return false;
+  if (strncmp(line, "$RT,", 4) != 0 && strncmp(line, "$RK,", 4) != 0 &&
+      strncmp(line, "$RP,", 4) != 0) return false;
   if (line[n - 3] != '*') return false;
   int hi = tlmHexNibble(line[n - 2]), lo = tlmHexNibble(line[n - 1]);
   if (hi < 0 || lo < 0) return false;

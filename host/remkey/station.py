@@ -19,7 +19,18 @@ import time
 from . import protocol as P
 from .config import StationConfig, load_station
 from .serial_link import FakeLink, KeyerLink, SerialLink
-from .telemetry import Calibration, CsvLog, LinkStats, Packet, ReplyAssembler, ReplyPart, parse_any
+from .telemetry import (
+    CableFit,
+    Calibration,
+    CsvLog,
+    LinkStats,
+    Packet,
+    PowerPacket,
+    ReplyAssembler,
+    ReplyPart,
+    gauge_match,
+    parse_any,
+)
 
 log = logging.getLogger("remkey.station")
 
@@ -62,11 +73,18 @@ class TelemetryHub:
         self.stale = True
         names = list(cfg.temp_names) + ["probe 1", "probe 2"]
         self.temp_names = [str(names[0]), str(names[1])]
+        self.pwr: PowerPacket | None = None          # latest $RP, scaled
+        self.pwr_time = 0.0
+        self.fit = CableFit()
+        self.pwr_flags = {"low": False, "high": False, "imax": False, "imin": False, "dead": False}
 
     def on_line(self, line: str) -> None:
         p = parse_any(line)
         if isinstance(p, ReplyPart):
             self._on_reply(p)
+            return
+        if isinstance(p, PowerPacket):
+            self._on_power(p)
             return
         if not isinstance(p, Packet):
             if line.startswith(("V:", "C:")):
@@ -77,9 +95,10 @@ class TelemetryHub:
         self.stats.update(p)
         pa_pk_w = self.pa_cal.watts(p.pa_pk_mv)
         pa_avg_w = self.pa_cal.watts(p.pa_avg_mv)
+        pwr = self.pwr if (self.pwr is not None and self.pwr.seq == p.seq) else None
         if self.csv:
             try:
-                self.csv.write(p, pa_pk_w, pa_avg_w)
+                self.csv.write(p, pa_pk_w, pa_avg_w, pwr)
             except OSError as exc:
                 log.warning("telemetry CSV: %s", exc)
         self.latest = {
@@ -117,6 +136,64 @@ class TelemetryHub:
                 self.hot[i] = False
                 self._alert("ok", f"{name} back to {t:.1f} C")
         self.notify(self.latest)
+
+    # ------------------------------------------------------------ supply monitor
+    def _on_power(self, raw: PowerPacket) -> None:
+        cfg = self.cfg
+        self.pwr = p = raw.scaled(cfg.v_scale, cfg.i_scale)
+        self.pwr_time = time.time()
+        self._flag("dead", not p.ok, "tower supply monitor (INA226) not answering",
+                   "tower supply monitor answering again")
+        if not p.ok:
+            return
+        self.fit.add(p.i_avg, p.v_avg)
+        if cfg.v_min_alert:
+            self._flag("low", p.v_min < cfg.v_min_alert if not self.pwr_flags["low"]
+                       else p.v_min < cfg.v_min_alert + 0.2,
+                       f"tower supply LOW: {p.v_min:.2f} V (at up to {p.i_max:.2f} A)",
+                       f"tower supply back to {p.v_min:.2f} V")
+        if cfg.v_max_alert:
+            self._flag("high", p.v_max > cfg.v_max_alert if not self.pwr_flags["high"]
+                       else p.v_max > cfg.v_max_alert - 0.2,
+                       f"tower supply HIGH: {p.v_max:.2f} V", f"tower supply back to {p.v_max:.2f} V")
+        if cfg.i_max_alert:
+            self._flag("imax", p.i_max > cfg.i_max_alert if not self.pwr_flags["imax"]
+                       else p.i_max > cfg.i_max_alert * 0.95,
+                       f"tower current HIGH: {p.i_max:.2f} A peak (limit {cfg.i_max_alert:.2f} A)",
+                       f"tower current back to {p.i_max:.2f} A peak")
+        if cfg.i_min_alert:
+            self._flag("imin", p.i_avg < cfg.i_min_alert if not self.pwr_flags["imin"]
+                       else p.i_avg < cfg.i_min_alert * 1.05,
+                       f"tower current LOW: {p.i_avg:.2f} A (expected at least {cfg.i_min_alert:.2f} A)",
+                       f"tower current back to {p.i_avg:.2f} A")
+        self.notify(self.power_message())
+
+    def _flag(self, key: str, active: bool, warn_msg: str, ok_msg: str) -> None:
+        if active and not self.pwr_flags[key]:
+            self.pwr_flags[key] = True
+            self._alert("warn", warn_msg)
+        elif not active and self.pwr_flags[key]:
+            self.pwr_flags[key] = False
+            self._alert("ok", ok_msg)
+
+    def power_message(self, detail: bool = False) -> dict:
+        p = self.pwr
+        if p is None:
+            return {"t": "pwr", "ok": False, "none": True}
+        msg = {"t": "pwr", "ok": p.ok, "v_avg": p.v_avg, "v_min": p.v_min, "v_max": p.v_max,
+               "i_avg": p.i_avg, "i_min": p.i_min, "i_max": p.i_max,
+               "base_v": self.cfg.base_supply_v, "drop_v": self.cfg.base_supply_v - p.v_avg,
+               "age_s": round(time.time() - self.pwr_time)}
+        if detail:
+            msg["query"] = True
+            fit = self.fit.result()
+            if fit:
+                awg, exp, verdict = gauge_match(fit["r_ohm"], self.cfg.cable_one_way_ft)
+                fit.update({"awg": awg, "expected_r": exp, "verdict": verdict,
+                            "one_way_ft": self.cfg.cable_one_way_ft})
+            msg["fit"] = fit
+            msg["fit_points"] = len(self.fit.pts)
+        return msg
 
     def _on_reply(self, rp: ReplyPart) -> None:
         done = self.replies.add(rp)
@@ -341,6 +418,11 @@ class StationService:
         elif t == "tlmq":
             snap = self.tlm.snapshot() if self.tlm else None
             await sess.send(snap or {"t": "log", "msg": "no tower telemetry"})
+        elif t == "pwrq":
+            if not self.tlm:
+                await sess.send({"t": "log", "msg": "no tower telemetry"})
+            else:
+                await sess.send(self.tlm.power_message(detail=True))
         elif t == "xvq":
             if not self.tlm:
                 await sess.send({"t": "log", "msg": "no tower telemetry"})

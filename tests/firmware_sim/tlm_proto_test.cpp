@@ -16,6 +16,20 @@ int main() {
   tlmFormat(buf, sizeof(buf), &d);
   std::printf("%s", buf);
 
+  // supply monitor packet, including a negative current (reversed shunt)
+  PwrData pw = {42, 13284, 12851, 13402, 4012, 3900, 6104, 1, "K2UA"};
+  if (tlmFormatPower(buf, sizeof(buf), &pw) <= 0) { fails++; std::printf("FAIL power format\n"); }
+  std::printf("%s", buf);
+  pw = {43, 14100, 14100, 14100, -512, -40960, 40959, 1, "K2UA"};
+  tlmFormatPower(buf, sizeof(buf), &pw);
+  std::printf("%s", buf);
+  {
+    char chk[TLM_MAX_LINE];
+    memcpy(chk, buf, sizeof(chk));
+    chk[strcspn(chk, "\r\n")] = 0;
+    if (!tlmValid(chk)) { fails++; std::printf("FAIL power valid\n"); }
+  }
+
   // validator on its own output and on corrupted copies
   buf[strcspn(buf, "\r\n")] = 0;
   if (!tlmValid(buf)) { fails++; std::printf("FAIL valid\n"); }

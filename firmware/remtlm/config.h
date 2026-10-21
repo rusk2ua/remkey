@@ -45,6 +45,7 @@
 #define PIN_ONEWIRE    5    // DS18B20 probes (4.7k pull-up to 5 V); up to 2 on one bus
 #define PIN_XV_RX      11   // Nano RX  <- level shifter <- MKU CON1 pin 11 TXD
 #define PIN_XV_TX      12   // Nano TX  -> level shifter -> MKU CON1 pin 12 RXD
+// A4 = SDA, A5 = SCL: INA226 supply monitor (fixed by the Nano's I2C hardware)
 
 // ---------------------------------------------------------------------------
 // Analog scaling (tower). The host converts mV to watts with your calibration
@@ -74,6 +75,21 @@
 #define XV_REPLY_GAP_MS   300UL    // reply is complete after this much silence
 #define XV_REPLY_MAX_MS   2000UL   // give up waiting for a reply
 #define XV_BUF            240      // longest reply kept (bytes)
+
+// ---------------------------------------------------------------------------
+// Tower supply monitor: INA226 on I2C with a high-side shunt in the 13.8 V feed
+// at the enclosure entry, ahead of everything in the box.
+//   SHUNT_UOHM: shunt resistance in micro-ohms. 2000 = 2 milliohm, which gives
+//               1.25 mA resolution and 40.9 A full scale (the INA226 tops out at
+//               81.92 mV across the shunt). If you leave a CJMCU-226 module's own
+//               R100 in place, the pair measures 1961 uOhm: set 1961.
+//   Trim small gain errors against a DMM with v_scale / i_scale in station.toml.
+// ---------------------------------------------------------------------------
+#define PWR_ENABLE       1
+#define INA226_ADDR      0x40     // A0 and A1 address pins to GND
+#define SHUNT_UOHM       2000L
+#define PWR_SAMPLE_MS    10UL     // the INA226 produces a new averaged reading every 8.8 ms
+#define PWR_RETRY_MS     5000UL   // re-initialise this often if the INA226 stops answering
 
 // ---------------------------------------------------------------------------
 // Reporting (tower)

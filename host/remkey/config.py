@@ -30,6 +30,15 @@ class StationConfig:
     temp_names: list = field(default_factory=lambda: ["PA heatsink", "transverter case"])
     tlm_stale_s: float = 10.0
     tlm_csv: str = "remkey-tlm.csv"
+    # --- tower supply monitor (INA226) ---
+    base_supply_v: float = 14.1      # what the supply at the tower base is set to
+    cable_one_way_ft: float = 100.0  # tower base to tower top
+    v_scale: float = 1.0             # trim to a DMM reading at the enclosure
+    i_scale: float = 1.0             # trim to a clamp meter / DMM in series
+    v_min_alert: float = 12.0        # MKU 10 G5 minimum supply; 0 = off
+    v_max_alert: float = 14.3        # 0 = off
+    i_max_alert: float = 0.0         # peak current above this; 0 = off until you know normal
+    i_min_alert: float = 0.0         # average current below this (something lost power); 0 = off
 
 
 @dataclass

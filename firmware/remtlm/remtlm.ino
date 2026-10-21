@@ -6,6 +6,9 @@
 //   - watches the MKU's LD output (10 MHz reference lock); any unlock during an
 //     interval is reported
 //   - reads up to two DS18B20 probes (PA heatsink, transverter case)
+//   - reads an INA226 supply monitor every 10 ms: voltage at the enclosure and
+//     current through a high-side shunt (min / max / average per interval, sent
+//     as a $RP packet just before each $RT)
 //   - sends a $RT packet every 2 s, every 0.5 s while the PA shows output, and
 //     immediately when lock changes
 //   - polls the MKU's serial port: "v" once after boot, then "s" every minute, and
@@ -31,9 +34,10 @@
 #if REMTLM_ROLE == ROLE_TOWER
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <Wire.h>
 #endif
 
-#define FW_VERSION "0.2.0"
+#define FW_VERSION "0.3.0"
 
 SoftwareSerial loraSerial(PIN_E220_TXD, PIN_E220_RXD);   // (rx, tx) from the Nano's side
 LoRa_E220 e220(&loraSerial, PIN_E220_AUX, PIN_E220_M0, PIN_E220_M1);
@@ -122,6 +126,7 @@ static uint8_t probeCount = 0;
 static bool tempPending = false;
 static uint32_t nextSample = 0, nextReport = 0, tempRequested = 0, nextTemp = 0;
 
+
 static uint16_t pinMv(uint8_t pin) {   // volts at the Nano pin
   return (uint16_t)(((uint32_t)analogRead(pin) * VREF_MV) / 1023UL);
 }
@@ -144,7 +149,105 @@ static void loraSend(const char *buf, int n) {
   digitalWrite(PIN_LED, !digitalRead(PIN_LED));
 }
 
+#if PWR_ENABLE
+// --- INA226 supply monitor ---------------------------------------------------
+static bool pwrUp = false, pwrOkAll = false;
+static uint32_t pwrNext = 0, pwrRetry = 0;
+static uint32_t pwrVSum = 0;
+static int32_t pwrISum = 0, pwrIMin = 0, pwrIMax = 0;
+static uint16_t pwrVMin = 0, pwrVMax = 0, pwrN = 0;
+
+static bool inaWrite(uint8_t reg, uint16_t v) {
+  Wire.beginTransmission(INA226_ADDR);
+  Wire.write(reg);
+  Wire.write((uint8_t)(v >> 8));
+  Wire.write((uint8_t)(v & 0xFF));
+  return Wire.endTransmission() == 0;
+}
+
+static bool inaRead(uint8_t reg, uint16_t *v) {
+  Wire.beginTransmission(INA226_ADDR);
+  Wire.write(reg);
+  if (Wire.endTransmission() != 0) return false;
+  if (Wire.requestFrom((uint8_t)INA226_ADDR, (uint8_t)2) != 2) return false;
+  uint8_t hi = Wire.read();
+  uint8_t lo = Wire.read();
+  *v = ((uint16_t)hi << 8) | lo;
+  return true;
+}
+
+static bool inaInit() {
+  uint16_t mfr = 0, die = 0;
+  if (!inaRead(0xFE, &mfr) || !inaRead(0xFF, &die)) return false;
+  if (mfr != 0x5449 || (die & 0xFFF0) != 0x2260) return false;   // "TI", INA226
+  // AVG=4, VBUS 1.1 ms, VSHUNT 1.1 ms, continuous shunt + bus: 8.8 ms per reading
+  return inaWrite(0x00, 0x4000 | (1 << 9) | (4 << 6) | (4 << 3) | 7);
+}
+
+static void pwrResetInterval() {
+  pwrVSum = 0;
+  pwrISum = 0;
+  pwrN = 0;
+  pwrOkAll = pwrUp;
+}
+
+static void servicePower(uint32_t now) {
+  if (!pwrUp) {
+    if ((int32_t)(now - pwrRetry) >= 0) {
+      pwrRetry = now + PWR_RETRY_MS;
+      pwrUp = inaInit();
+      Serial.println(pwrUp ? F("I:INA226 ok") : F("I:INA226 not found"));
+    }
+    return;
+  }
+  if ((int32_t)(now - pwrNext) < 0) return;
+  pwrNext = now + PWR_SAMPLE_MS;
+  uint16_t rawSh, rawBus;
+  if (!inaRead(0x01, &rawSh) || !inaRead(0x02, &rawBus)) {
+    pwrUp = false;
+    pwrOkAll = false;
+    pwrRetry = now + PWR_RETRY_MS;
+    return;
+  }
+  uint16_t vMv = (uint16_t)(((uint32_t)rawBus * 125UL) / 100UL);     // 1.25 mV LSB
+  int32_t iMa = ((int32_t)(int16_t)rawSh * 2500L) / SHUNT_UOHM;       // 2.5 uV LSB
+  if (pwrN == 0) {
+    pwrVMin = pwrVMax = vMv;
+    pwrIMin = pwrIMax = iMa;
+  } else {
+    if (vMv < pwrVMin) pwrVMin = vMv;
+    if (vMv > pwrVMax) pwrVMax = vMv;
+    if (iMa < pwrIMin) pwrIMin = iMa;
+    if (iMa > pwrIMax) pwrIMax = iMa;
+  }
+  pwrVSum += vMv;
+  pwrISum += iMa;
+  pwrN++;
+}
+
+static void sendPower(uint16_t seqForPacket) {
+  char buf[TLM_MAX_LINE];
+  PwrData d;
+  bool ok = pwrOkAll && pwrN > 0;
+  d.seq = seqForPacket;
+  d.vAvgMv = ok ? (uint16_t)(pwrVSum / pwrN) : 0;
+  d.vMinMv = ok ? pwrVMin : 0;
+  d.vMaxMv = ok ? pwrVMax : 0;
+  d.iAvgMa = ok ? pwrISum / (int32_t)pwrN : 0;
+  d.iMinMa = ok ? pwrIMin : 0;
+  d.iMaxMa = ok ? pwrIMax : 0;
+  d.ok = ok ? 1 : 0;
+  d.call = CALLSIGN;
+  int n = tlmFormatPower(buf, sizeof(buf), &d);
+  if (n > 0) loraSend(buf, n);
+  pwrResetInterval();
+}
+#endif
+
 static void sendReport() {
+#if PWR_ENABLE
+  sendPower(seq);          // same seq as the $RT that follows
+#endif
   char buf[TLM_MAX_LINE];
   TlmData d;
   d.seq = seq++;
@@ -260,6 +363,15 @@ void setup() {
   probes.setWaitForConversion(false);
   Serial.print(F("I:temperature probes="));
   Serial.println(probeCount);
+#if PWR_ENABLE
+  Wire.begin();
+  Wire.setClock(100000);
+  Wire.setWireTimeout(3000, true);   // never hang the tower on a bad I2C bus
+  pwrUp = inaInit();
+  Serial.println(pwrUp ? F("I:INA226 ok") : F("I:INA226 not found"));
+  pwrRetry = millis() + PWR_RETRY_MS;
+  pwrResetInterval();
+#endif
 #if XV_SERIAL_ENABLE
   xvSerial.begin(XV_BAUD);
   xvSerial.listen();     // the E220 port is only written from here on
@@ -288,6 +400,9 @@ void loop() {
     }
   }
   serviceTemp(now);
+#if PWR_ENABLE
+  servicePower(now);
+#endif
 #if XV_SERIAL_ENABLE
   serviceXv(now);
 #endif

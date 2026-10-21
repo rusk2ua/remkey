@@ -14,7 +14,7 @@ import sys
 import time
 
 from .config import load_station
-from .telemetry import Calibration, LinkStats, Packet, ReplyAssembler, ReplyPart, parse_any
+from .telemetry import Calibration, LinkStats, Packet, PowerPacket, ReplyAssembler, ReplyPart, parse_any
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,9 +27,11 @@ def main(argv: list[str] | None = None) -> int:
     import serial
 
     pa_cal = xv_cal = Calibration([])
+    v_scale = i_scale = 1.0
     if args.config:
         cfg = load_station(args.config)
         pa_cal, xv_cal = Calibration(cfg.pa_cal), Calibration(cfg.xv_cal)
+        v_scale, i_scale = cfg.v_scale, cfg.i_scale
 
     stats = LinkStats()
     replies = ReplyAssembler()
@@ -51,6 +53,15 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{time.strftime('%H:%M:%S')} transverter '{cmd}':")
                     for ln in text.splitlines():
                         print(f"      {ln}")
+                continue
+            if isinstance(p, PowerPacket):
+                if not p.ok:
+                    print(f"{time.strftime('%H:%M:%S')} #{p.seq:<5d} supply monitor NOT ANSWERING")
+                    continue
+                q = p.scaled(v_scale, i_scale)
+                print(f"{time.strftime('%H:%M:%S')} #{q.seq:<5d} supply {q.v_avg:6.3f} V"
+                      f" (min {q.v_min:6.3f} max {q.v_max:6.3f})  {q.i_avg:6.3f} A"
+                      f" (min {q.i_min:6.3f} max {q.i_max:6.3f})")
                 continue
             if not isinstance(p, Packet):
                 if line:

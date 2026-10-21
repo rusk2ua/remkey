@@ -3,6 +3,25 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-10-21 (later)
+
+### remtlm firmware 0.3.0
+- INA226 supply monitor on I2C: voltage at the tower enclosure and current through
+  a high-side shunt, min/max/average per interval, sent as `$RP` packets.
+
+### Host package 0.3.0
+- Supply readings in the client (Ctrl-V, Ctrl-P, after-TX summary), alerts for
+  low/high voltage, high/low current and INA226 failure, CSV columns.
+- Cable loop resistance and supply voltage at the base, fitted from the readings,
+  with a wire-gauge check.
+- `python -m remkey.powerstats`: receive/transmit supply statistics from the CSV
+  log and suggested alert limits.
+
+### Fixes
+- remkey firmware: keyer enums moved to `keyer_types.h` so the Arduino build's
+  generated prototypes compile (CI failure on the client and station images).
+- README: the 927 MHz link is part of the amateur station (Part 97), not Part 15.
+
 ## 2026-10-21
 
 ### Docs

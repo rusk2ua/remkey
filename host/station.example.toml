@@ -57,3 +57,23 @@ tlm_stale_s = 10.0
 
 # One row per packet, for heatsink-temperature history etc. Empty = off.
 tlm_csv = "remkey-tlm.csv"
+
+# ---------------------------------------------------------------------------
+# Tower supply monitor (INA226 in the transverter enclosure)
+# ---------------------------------------------------------------------------
+# What the supply at the tower base is set to; the drop is measured against it
+base_supply_v = 14.1
+
+# One-way cable length, tower base to the enclosure (for the wire-gauge check)
+cable_one_way_ft = 100
+
+# Trim to a DMM at the enclosure / a clamp meter (measured / displayed)
+v_scale = 1.0
+i_scale = 1.0
+
+# Alerts. 0 turns one off. Leave the current limits at 0 until you know what's
+# normal, then run:  python -m remkey.powerstats remkey-tlm.csv --config station.toml
+v_min_alert = 12.0     # MKU 10 G5 minimum supply rating
+v_max_alert = 14.3
+i_max_alert = 0.0      # peak current above this
+i_min_alert = 0.0      # average current below this (something in the box lost power)
