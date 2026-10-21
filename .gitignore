@@ -8,3 +8,4 @@ host/client.toml
 *.log
 tests/firmware_sim/sim_*
 !tests/firmware_sim/sim_test.cpp
+remkey-tlm.csv

@@ -9,7 +9,8 @@ Hotkeys (terminal):
     Ctrl-T  toggle PTT            Esc     abort queued text / tune
     Ctrl-U  tune carrier (needs PTT on; press Esc to stop early)
     Ctrl-F  faster (+1 WPM)       Ctrl-S  slower (-1 WPM)
-    Ctrl-G  status / RTT          Ctrl-Q or Ctrl-C  quit
+    Ctrl-G  status / RTT          Ctrl-P  tower PA power, temp, LO lock
+    Ctrl-Q or Ctrl-C  quit
     Any other printable key is sent as CW; Enter sends a space.
     Type <SK>, <AR>, <BT>, <KN> for prosigns.
 """
@@ -34,7 +35,7 @@ CTRL = {chr(i + 1): chr(ord("A") + i) for i in range(26)}  # '\x14' -> 'T'
 ESC = "\x1b"
 
 HOTKEY_HELP = (
-    "Ctrl-T PTT | Ctrl-U tune | Esc abort | Ctrl-F/Ctrl-S speed | Ctrl-G status | Ctrl-Q quit"
+    "Ctrl-T PTT | Ctrl-U tune | Esc abort | Ctrl-F/Ctrl-S speed | Ctrl-G status | Ctrl-P PA | Ctrl-Q quit"
 )
 
 
@@ -70,6 +71,8 @@ class ClientApp:
         self.quit = asyncio.Event()
         self._writer: Optional[asyncio.StreamWriter] = None
         self._typed = ""     # buffer for <PROSIGN> typing
+        self.tlm: Optional[dict] = None
+        self._tx_peak: Optional[tuple] = None   # (watts or None, mV) peak during this PTT
         link.set_handler(self.on_keyer_line)
 
     # ------------------------------------------------------------ outbound
@@ -125,6 +128,33 @@ class ClientApp:
         self.console.event(
             f"station {link} | PTT {'ON' if self.station_ptt else 'off'} | {self.wpm} WPM | RTT {rtt}"
         )
+        if self.tlm:
+            self.console.event(self.tlm_line(self.tlm))
+
+    @staticmethod
+    def _power(w, mv) -> str:
+        return f"{w:.1f} W" if isinstance(w, (int, float)) else f"{mv} mV"
+
+    def tlm_line(self, m: dict) -> str:
+        temp = m.get("temp_c")
+        parts = [
+            f"PA peak {self._power(m.get('pa_pk_w'), m.get('pa_pk_mv'))}"
+            f" avg {self._power(m.get('pa_avg_w'), m.get('pa_avg_mv'))}",
+            f"XV {self._power(m.get('xv_pk_w'), m.get('xv_pk_mv'))}",
+            f"heatsink {temp:.1f} C" if isinstance(temp, (int, float)) else "heatsink n/a",
+            "LO locked" if m.get("lock") else "LO UNLOCKED",
+            f"link loss {m.get('loss_pct', 0)}%",
+        ]
+        if m.get("stale"):
+            parts.append(f"STALE ({m.get('age_s')} s old)")
+        return "tower: " + " | ".join(parts)
+
+    def show_tlm(self) -> None:
+        if not self._send({"t": "tlmq"}):
+            if self.tlm:
+                self.console.event(self.tlm_line(self.tlm) + " (cached)")
+            else:
+                self.console.event("no tower telemetry yet")
 
     # ------------------------------------------------------------ keyer events
     def on_keyer_line(self, line: str) -> None:
@@ -165,6 +195,8 @@ class ClientApp:
                 self.set_wpm(self.wpm - 1)
             elif key == "G":
                 self.status()
+            elif key == "P":
+                self.show_tlm()
             elif key in ("Q", "C"):
                 self.quit.set()
             return
@@ -226,16 +258,37 @@ class ClientApp:
             self.link.send(f"L:{1 if self.station_ptt else 0}")
             if was != self.station_ptt:
                 self.console.event(f"STATION PTT {'ON' if self.station_ptt else 'off'}")
+                if self.station_ptt:
+                    self._tx_peak = None
+                else:
+                    self._report_tx()
         elif t == "hb":
             ts = msg.get("ts")
             if isinstance(ts, (int, float)):
                 self.rtt_ms = (time.monotonic() - ts) * 1000
         elif t == "drained":
             pass
+        elif t == "tlm":
+            self.tlm = msg
+            if self.station_ptt:
+                w, mv = msg.get("pa_pk_w"), msg.get("pa_pk_mv", 0)
+                if self._tx_peak is None or mv > self._tx_peak[1]:
+                    self._tx_peak = (w, mv)
+            if "age_s" in msg:          # reply to Ctrl-P
+                self.console.event(self.tlm_line(msg))
+        elif t == "alert":
+            mark = "!!" if msg.get("level") == "warn" else "--"
+            self.console.event(f"{mark} {msg.get('msg')}")
         elif t == "wdog":
             self.console.event(f"SAFETY STOP: {msg.get('why')}")
         elif t in ("log", "err"):
             self.console.event(f"station: {msg.get('msg')}")
+
+    def _report_tx(self) -> None:
+        if self._tx_peak is not None:
+            w, mv = self._tx_peak
+            self.console.event(f"last TX: PA peak {self._power(w, mv)}")
+        self._tx_peak = None
 
     def _on_disconnect(self) -> None:
         self.connected = False

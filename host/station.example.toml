@@ -22,3 +22,32 @@ wpm_offset = 2
 max_tune_ms = 15000
 
 log_file = "remkey-station.log"
+
+# ---------------------------------------------------------------------------
+# Tower telemetry (remtlm). Leave tlm_port empty to disable.
+# ---------------------------------------------------------------------------
+# COM port of the remtlm BASE Nano in the radio room
+tlm_port = ""
+tlm_baud = 115200
+
+# PA power-sense calibration: [mV at the PA sense pin, watts at the PA output].
+# Measure with a power meter (see README "Calibrating the PA power sense").
+# Leave empty to see raw mV only.
+pa_cal = [
+  # [0, 0.0],
+  # [800, 1.0],
+  # [2200, 5.0],
+  # [3400, 10.0],
+]
+
+# Same for the transverter's own power-sense output (optional)
+xv_cal = []
+
+# Alert when the PA heatsink reaches this temperature (clears 3 C below)
+temp_warn_c = 65.0
+
+# Alert if no telemetry packet arrives for this long
+tlm_stale_s = 10.0
+
+# One row per packet, for heatsink-temperature history etc. Empty = off.
+tlm_csv = "remkey-tlm.csv"

@@ -19,6 +19,7 @@ from typing import Optional
 from . import protocol as P
 from .config import StationConfig, load_station
 from .serial_link import FakeLink, KeyerLink, SerialLink
+from .telemetry import Calibration, CsvLog, LinkStats, parse_packet
 
 log = logging.getLogger("remkey.station")
 
@@ -43,16 +44,99 @@ class Session:
             pass
 
 
+class TelemetryHub:
+    """Turns remtlm packets from the base Nano into calibrated readings and alerts."""
+
+    def __init__(self, cfg: StationConfig, notify):
+        self.cfg = cfg
+        self.notify = notify                 # callable(dict): send to the client if connected
+        self.pa_cal = Calibration(cfg.pa_cal)
+        self.xv_cal = Calibration(cfg.xv_cal)
+        self.stats = LinkStats()
+        self.csv = CsvLog(cfg.tlm_csv) if cfg.tlm_csv else None
+        self.latest: Optional[dict] = None
+        self.lock_ok = True
+        self.hot = False
+        self.stale = True
+
+    def on_line(self, line: str) -> None:
+        p = parse_packet(line)
+        if p is None:
+            if line.startswith(("V:", "C:")):
+                log.info("telemetry base: %s", line)
+            elif line.startswith("E:"):
+                log.warning("telemetry base: %s", line)
+            return
+        self.stats.update(p)
+        pa_pk_w = self.pa_cal.watts(p.pa_pk_mv)
+        pa_avg_w = self.pa_cal.watts(p.pa_avg_mv)
+        if self.csv:
+            try:
+                self.csv.write(p, pa_pk_w, pa_avg_w)
+            except OSError as exc:
+                log.warning("telemetry CSV: %s", exc)
+        self.latest = {
+            "t": "tlm",
+            "seq": p.seq,
+            "pa_pk_mv": p.pa_pk_mv,
+            "pa_avg_mv": p.pa_avg_mv,
+            "pa_pk_w": pa_pk_w,
+            "pa_avg_w": pa_avg_w,
+            "xv_pk_mv": p.xv_pk_mv,
+            "xv_pk_w": self.xv_cal.watts(p.xv_pk_mv),
+            "lock": p.lock,
+            "temp_c": p.temp_c,
+            "uptime_s": p.uptime_s,
+            "loss_pct": round(self.stats.loss_pct_5min(), 1),
+        }
+        if self.stale:
+            self.stale = False
+            self._alert("ok", "tower telemetry link up")
+        if p.lock != self.lock_ok:
+            self.lock_ok = p.lock
+            self._alert("ok" if p.lock else "warn", "LO locked" if p.lock else "LO UNLOCKED")
+        if p.temp_c is not None:
+            if not self.hot and p.temp_c >= self.cfg.temp_warn_c:
+                self.hot = True
+                self._alert("warn", f"PA heatsink HOT: {p.temp_c:.1f} C")
+            elif self.hot and p.temp_c < self.cfg.temp_warn_c - 3:
+                self.hot = False
+                self._alert("ok", f"PA heatsink back to {p.temp_c:.1f} C")
+        self.notify(self.latest)
+
+    def check_stale(self) -> None:
+        age = self.stats.age_s()
+        if not self.stale and (age is None or age > self.cfg.tlm_stale_s):
+            self.stale = True
+            self._alert("warn", f"tower telemetry lost (no packet for {self.cfg.tlm_stale_s:.0f} s)")
+
+    def snapshot(self) -> Optional[dict]:
+        if self.latest is None:
+            return None
+        snap = dict(self.latest)
+        snap["age_s"] = round(self.stats.age_s() or 0.0, 1)
+        snap["stale"] = self.stale
+        return snap
+
+    def _alert(self, level: str, msg: str) -> None:
+        (log.warning if level == "warn" else log.info)("telemetry: %s", msg)
+        self.notify({"t": "alert", "level": level, "msg": msg})
+
+
 class StationService:
-    def __init__(self, cfg: StationConfig, link: KeyerLink):
+    def __init__(self, cfg: StationConfig, link: KeyerLink, tlm_link: Optional[KeyerLink] = None):
         self.cfg = cfg
         self.link = link
+        self.tlm_link = tlm_link
+        self.tlm = TelemetryHub(cfg, self._notify) if tlm_link is not None else None
         self.session: Optional[Session] = None
         self.ptt = False
         self.wpm = 18
         self.server: Optional[asyncio.base_events.Server] = None
         self._hb_task: Optional[asyncio.Task] = None
         link.set_handler(self._on_keyer_line)
+        if tlm_link is not None:
+            tlm_link.set_handler(self.tlm.on_line)
 
     # ------------------------------------------------------------ lifecycle
     async def start(self) -> None:
@@ -83,7 +167,13 @@ class StationService:
     async def _keyer_heartbeat(self) -> None:
         while True:
             self.link.send("H")
+            if self.tlm:
+                self.tlm.check_stale()
             await asyncio.sleep(1.0)
+
+    def _notify(self, msg: dict) -> None:
+        if self.session:
+            self.session.send_nowait(msg)
 
     # ------------------------------------------------------------ safety
     def _safe_off(self, why: str) -> None:
@@ -152,6 +242,10 @@ class StationService:
         log.info("client connected: %s", sess.peer)
         await sess.send({"t": "ok"})
         await sess.send(self._state())
+        if self.tlm:
+            snap = self.tlm.snapshot()
+            if snap:
+                await sess.send(snap)
         why = "client disconnected"
         try:
             while True:
@@ -215,6 +309,9 @@ class StationService:
             self.link.send(f"U:{ms}")
         elif t == "abort":
             self.link.send("X")
+        elif t == "tlmq":
+            snap = self.tlm.snapshot() if self.tlm else None
+            await sess.send(snap or {"t": "log", "msg": "no tower telemetry"})
         else:
             await sess.send({"t": "err", "msg": f"unknown type {t!r}"})
 
@@ -222,13 +319,18 @@ class StationService:
 async def _amain(cfg: StationConfig, dry_run: bool) -> None:
     loop = asyncio.get_running_loop()
     link: KeyerLink = FakeLink() if dry_run else SerialLink(cfg.keyer_port, cfg.keyer_baud, loop)
-    svc = StationService(cfg, link)
+    tlm_link: Optional[KeyerLink] = None
+    if cfg.tlm_port and not dry_run:
+        tlm_link = SerialLink(cfg.tlm_port, cfg.tlm_baud, loop)
+    svc = StationService(cfg, link, tlm_link)
     await svc.start()
     try:
         await asyncio.Event().wait()
     finally:
         await svc.stop()
         link.close()
+        if tlm_link:
+            tlm_link.close()
 
 
 def main(argv: list[str] | None = None) -> int:

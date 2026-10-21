@@ -43,9 +43,12 @@ Anything the decoder doesn't recognise, such as SK or a fumbled character, is pa
 firmware/remkey/remkey.ino     Nano sketch (both roles)
 firmware/remkey/config.h       role, pins, defaults
 firmware/platformio.ini        optional PlatformIO/VS Code build
+firmware/remtlm/               tower telemetry over LoRa (tower + base roles), section 9
 host/remkey/station.py         shack service (Windows)
 host/remkey/client.py          travel client (macOS; Linux works too)
 host/remkey/protocol.py        network protocol, CW text sanitiser
+host/remkey/telemetry.py       remtlm packet parsing, calibration, link statistics
+host/remkey/tlmview.py         bench viewer for calibrating the PA power sense
 host/*.example.toml            config templates
 host/tests/                    pytest: protocol + end-to-end over localhost
 tests/firmware_sim/            g++ simulation of the sketch (timing, decoder, watchdog)
@@ -226,7 +229,8 @@ This requires an AnyDesk plan that includes TCP tunneling.
 | **Esc** | Abort queued text and any tune carrier |
 | **Ctrl-U** | Tune carrier (`tune_ms`, capped by the station). Needs PTT on. |
 | **Ctrl-F / Ctrl-S** | Speed +1 / −1 WPM, both ends |
-| **Ctrl-G** | Status: link, PTT, WPM, round-trip time |
+| **Ctrl-G** | Status: link, PTT, WPM, round-trip time (plus tower telemetry if fitted) |
+| **Ctrl-P** | Tower: PA power, transverter power, heatsink temperature, LO lock |
 | **Ctrl-Q / Ctrl-C** | Quit. PTT is dropped first. |
 | Typing | Sent as CW. Enter sends a space. `<SK>`, `<AR>`, `<BT>`, `<KN>` send prosigns. |
 
@@ -288,12 +292,140 @@ The firmware simulation checks:
 - PTT button debounce.
 - That the client paddle never drives the KEY output.
 
-The firmware has been verified in that simulation but not yet on real hardware. The first AVR build may surface board-specific warnings; please open an issue with the output.
+Both sketches (remkey and remtlm, every role) also compile cleanly with avr-gcc 14.1 against the Arduino AVR core and the real libraries, with `-Wall -Wextra`:
+
+| Image | Flash | Static RAM |
+|---|---|---|
+| remkey client / station | 8.3 KB | 545 B |
+| remtlm tower | 14.6 KB | 472 B |
+| remtlm base | 8.0 KB | 446 B |
+
+None of it has run on real hardware yet. The bench tests in sections 7 and 9 are the first-power-up checklists.
+
+## 9. Tower telemetry (remtlm)
+
+A second pair of Nanos brings tower-top readings into the radio room over a LoRa link:
+
+- the **PA power-sense output** (peak and average, so CW dits aren't missed)
+- the **transverter power-sense output**
+- **LO lock** (any unlock during a reporting interval is reported)
+- **PA heatsink temperature** from a DS18B20 probe
+
+```
+ TOWER TOP (13.8 V from transverter supply)                RADIO ROOM
+┌─────────────────────────────────────────┐            ┌──────────────────────────────┐
+│ PA sense 0-5V ─► A0 ┐                    │  927.125   │ E220 ─► BASE Nano ─USB─► PC   │
+│ XV sense 0-5V ─► A1 ├─ TOWER Nano ─► E220 ~~~ MHz ~~~►│  validates packets   station  │
+│ LO lock ──────► D4  │                    │  LoRa      │                      service  │
+│ DS18B20 ──────► D5 ┘                    │            │  ─► client: Ctrl-P, alerts,   │
+└─────────────────────────────────────────┘            │     "last TX: PA peak 9.0 W"  │
+                                                       └──────────────────────────────┘
+```
+
+There is no conductor between the tower and the house, so the link adds no lightning path. Everything ends up in the same station service and Mac client as remkey.
+
+### Frequency and legality
+
+- The link runs on **927.125 MHz** (E220-900T22D channel 77, set by `LORA_CHANNEL` in `firmware/remtlm/config.h`). That's the top of the US 902–928 MHz band and about 24 MHz clear of 902–903 weak-signal work.
+- Packets are plain ASCII with no encryption, and every packet carries your callsign. That keeps the link legal whether you treat it as a Part 15 device or as a Part 97 station.
+- Transmit power defaults to 17 dBm, which is plenty for 200 ft through block. Raise it with `LORA_TX_POWER` if the link is marginal.
+
+### Parts (both ends unless noted)
+
+| Qty | Part | Notes |
+|---|---|---|
+| 2 | Ebyte E220-900T22D | Both ends must be the **900** version |
+| 2 | 915 MHz antenna (SMA) | A whip is fine; a small yagi at the house end if needed |
+| 2 | Arduino Nano | |
+| 6+6 | 1 kΩ and 2 kΩ resistors | 5 V → 3.3 V dividers on M0, M1 and RXD, at each end |
+| 2 | 100 µF electrolytic | Across the E220 VCC/GND pins (TX current peaks) |
+| 1 | 5 V buck module (MP1584 or similar) + 1 A fuse | Tower: 13.8 V → 5 V |
+| 1 | DS18B20 waterproof probe + 4.7 kΩ resistor | Tower |
+| 2 | 10 kΩ + 22 kΩ resistors, 100 nF caps | Tower: input dividers for A0 and A1 |
+| 1 | 1 kΩ resistor | Tower: LO-lock series resistor |
+| 1 | Weatherproof box with cable glands | Tower |
+
+### Wiring: E220 to Nano (same at both ends)
+
+The E220's logic is 3.3 V and not every pin is 5 V tolerant, so the three Nano outputs go through dividers.
+
+```
+E220 pin   Nano
+M0   ◄──── 2k ──┬── 1k ──── D9        (each divider: Nano ─1k─┬─ E220 pin
+M1   ◄──── 2k ──┼── 1k ──── D10                               └─2k─ GND)
+RXD  ◄──── 2k ──┼── 1k ──── D8
+            GND ┘
+TXD  ─────────────────────► D7        (3.3 V high is read fine by the Nano)
+AUX  ─────────────────────► D6
+VCC  ── 5 V ── 100 µF ── GND
+GND  ── GND
+```
+
+### Wiring: tower Nano
+
+```
+13.8 V ── 1 A fuse ── buck (set to 5.0 V) ──► Nano 5V pin (not VIN), E220 VCC, DS18B20
+PA sense  ── 10k ──┬── A0      XV sense ── 10k ──┬── A1      (22k and 100 nF to GND
+                   ├─ 22k ─ GND                   ├─ 22k ─ GND  keep 5 V inputs under
+                   └─ 100nF ─ GND                 └─ 100nF ─ GND the ADC ceiling)
+LO lock   ── 1k ── D4    (internal pull-up; works for TTL or open-collector outputs)
+DS18B20   red 5V, black GND, yellow ── D5, 4.7k from D5 to 5V
+```
+
+**Configuration notes:**
+
+- Set `LOCK_ACTIVE_HIGH` to match your transverter. If its lock output swings higher than 5 V, add a divider.
+- The sense outputs' ground must be common with the Nano's. It is, since everything runs from the transverter supply.
+- Clamp the DS18B20 under a heatsink screw near the PA device, with thermal compound.
+- Measure the buck's 5 V rail with a DMM and enter it as `VREF_MV`. The ADC uses that rail as its reference.
+
+### Wiring: base Nano (radio room)
+
+Only the E220 block above, plus USB to the shack PC. Put the module and its antenna where it has the best view of the tower, for example a window. A USB extension cable is fine.
+
+### Build and check
+
+1. In the Arduino IDE, install **EByte LoRa E220 library** (Renzo Mischianti), **OneWire** and **DallasTemperature**.
+2. Open `firmware/remtlm/remtlm.ino`, set `REMTLM_ROLE` in `config.h`, and upload the TOWER image to one Nano and the BASE image to the other. Alternatively, run `pio run -e tower` / `-e base` from `firmware/remtlm`.
+3. At boot, each Nano prints `V:remtlm 0.1.0 tower|base`, then `C:ok ch=77 freq_khz=927125`. The first boot also prints `C:written`, since it writes the settings to the module once.
+   - `C:ERR read config` means it can't talk to the module: check the M0, M1 and AUX wiring and the module's power.
+4. The tower Nano echoes every packet on its own USB port, so you can watch it on the bench.
+5. The base Nano prints only valid packets: `$RT,...*HH`.
+
+### Shack configuration
+
+In `station.toml`, set `tlm_port` to the base Nano's COM port. Then:
+
+- **Ctrl-P** in the client prints the tower readings.
+- **Ctrl-G** includes them.
+- **Alerts** print on their own lines (`!!` = warning, `--` = cleared):
+  - LO unlock
+  - heatsink at or above `temp_warn_c`
+  - no packets for `tlm_stale_s`
+- **TX summary:** when you drop PTT, the client prints `last TX: PA peak … W`.
+- **CSV log:** every packet is also logged to `remkey-tlm.csv`, which gives you heatsink temperature history.
+
+### Calibrating the PA power sense
+
+Detector outputs aren't linear in power, so remkey uses a table you measure:
+
+1. Put a power meter (through a suitable attenuator) on the PA output. On the bench before installation is easiest.
+2. Run `python -m remkey.tlmview --port <tower Nano port>` and key a carrier (Ctrl-U tune, or locally) at several drive levels.
+3. For each level, note the meter's watts and the `PA pk` mV reading.
+4. Enter the pairs in `station.toml` as `pa_cal = [[mV, W], ...]`. Four or five points spanning low to full power are plenty.
+5. Do the same for `xv_cal` if you want the transverter's output in watts too.
+
+Until a table is entered, readings are shown in mV.
+
+### Later: transverter serial control
+
+The transverter's serial control interface isn't used yet. The tower Nano's hardware UART is free when USB isn't connected, so reading the transverter's own status (or controlling it) from the shack is a natural next step once its protocol is known.
 
 ## Protocol reference
 
 - Network protocol: JSON lines over TCP, documented in `host/remkey/protocol.py`.
 - Serial protocol: newline-terminated commands at 115200 baud, documented at the top of `firmware/remkey/remkey.ino`.
+- Telemetry packet: `$RT,seq,pa_pk_mv,pa_avg_mv,xv_pk_mv,lock,temp_c10,uptime_s,call*HH`, documented in `firmware/remtlm/tlm_proto.h`.
 
 ## License
 

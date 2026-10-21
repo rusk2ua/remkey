@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,14 @@ class StationConfig:
     max_tune_ms: int = 15000
     max_text_chars: int = 512
     log_file: str = "remkey-station.log"
+    # --- tower telemetry (remtlm base Nano); empty tlm_port = disabled ---
+    tlm_port: str = ""
+    tlm_baud: int = 115200
+    pa_cal: list = field(default_factory=list)     # [[mV, watts], ...]
+    xv_cal: list = field(default_factory=list)
+    temp_warn_c: float = 65.0
+    tlm_stale_s: float = 10.0
+    tlm_csv: str = "remkey-tlm.csv"
 
 
 @dataclass
