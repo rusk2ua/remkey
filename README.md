@@ -15,7 +15,7 @@ remkey is built for a station where:
 
 It is two Arduino Nanos running the same sketch, plus a small Python bridge. An optional second pair of Nanos (**remtlm**, section 9) brings tower-top PA power, temperatures, reference lock and Kuhne transverter status into the radio room over a LoRa link.
 
-**Quick start:** wire and flash the Nanos (sections 1–3), run the station service on the shack PC (section 4), pick a network path (section 5), and run the client on your Mac (section 6). Do the bench test (section 7) before connecting anything to the tower.
+**Quick start:** wire and flash the Nanos (sections 1–3), run the station service on the shack PC (section 4), pick a network path (section 5), and run the client on your Mac (section 6). Do the bench test (section 7) before connecting anything to the tower. For a step-by-step checklist from ordering parts to a hardened station, see [docs/build-plan.md](docs/build-plan.md).
 
 ```
   TRAVEL END (Mac)                                         SHACK (Windows PC)
@@ -60,6 +60,7 @@ host/*.example.toml            config templates
 host/tests/                    pytest: protocol, end-to-end over localhost, telemetry
 tests/firmware_sim/            g++ simulation of the sketch (timing, decoder, watchdog)
 .github/workflows/ci.yml       CI: Python on Linux/Windows/macOS, simulation, firmware builds
+docs/build-plan.md             phased build checklist, parts to tower installation
 CHANGELOG.md                   per-component versions and changes
 CONTRIBUTING.md, SECURITY.md   how to run the checks; security model and reporting
 ```

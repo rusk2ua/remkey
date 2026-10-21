@@ -5,6 +5,9 @@ firmware and the remtlm telemetry firmware each carry their own version.
 
 ## 2026-10-21
 
+### Docs
+- `docs/build-plan.md`: phased build checklist.
+
 ### Host package 0.2.0
 - Tower telemetry: `$RT` readings and `$RK` transverter replies from the remtlm base
   Nano, calibration tables (mV to watts), link-loss statistics, CSV log.
