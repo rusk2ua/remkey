@@ -237,6 +237,7 @@ class StationService:
         self.tlm = TelemetryHub(cfg, self._notify) if tlm_link is not None else None
         self.session: Session | None = None
         self.ptt = False
+        self.releasing = False          # PTT off requested; station finishing CW + hang
         self.wpm = 18
         self.server: asyncio.base_events.Server | None = None
         self._hb_task: asyncio.Task | None = None
@@ -247,8 +248,8 @@ class StationService:
     # ------------------------------------------------------------ lifecycle
     async def start(self) -> None:
         self.link.send("G:1")          # make sure the Nano watchdog is armed
-        self.link.send("P:0")
-        self.link.send("X")
+        self.link.send(f"J:{max(0, min(10000, int(self.cfg.ptt_hang_ms)))}")
+        self.link.send("O")            # PTT off and nothing queued, right now
         self.link.send("V")
         self.server = await asyncio.start_server(
             self._handle_client, self.cfg.listen_host, self.cfg.listen_port, limit=P.MAX_LINE
@@ -283,11 +284,12 @@ class StationService:
 
     # ------------------------------------------------------------ safety
     def _safe_off(self, why: str) -> None:
+        """Safety stop: abort CW and drop PTT immediately (no release hang)."""
         if self.ptt:
             log.warning("PTT off: %s", why)
-        self.link.send("X")
-        self.link.send("P:0")
+        self.link.send("O")
         self.ptt = False
+        self.releasing = False
 
     # ------------------------------------------------------------ keyer events
     def _on_keyer_line(self, line: str) -> None:
@@ -295,9 +297,25 @@ class StationService:
         if line == "D":
             if s:
                 s.send_nowait({"t": "drained"})
+        elif line in ("P:0", "P:1"):
+            # the Nano reports every actual change of its PTT output
+            on = line == "P:1"
+            if on:
+                # Don't touch `releasing`: this report can arrive after a release was
+                # already requested (PTT on then off in quick succession).
+                self.ptt = True
+            else:
+                if self.ptt or self.releasing:
+                    log.info("PTT off (released after queued CW and hang)" if self.releasing
+                             else "PTT off")
+                self.ptt = False
+                self.releasing = False
+            if s:
+                s.send_nowait(self._state())
         elif line.startswith("!:"):
             log.warning("keyer watchdog: %s", line)
             self.ptt = False
+            self.releasing = False
             if s:
                 s.send_nowait({"t": "wdog", "why": "station keyer watchdog"})
                 s.send_nowait(self._state())
@@ -314,7 +332,8 @@ class StationService:
             log.debug("keyer: %s", line)
 
     def _state(self) -> dict:
-        return {"t": "state", "ptt": self.ptt, "wpm": self.wpm}
+        return {"t": "state", "ptt": self.ptt, "releasing": self.releasing, "wpm": self.wpm,
+                "hang_ms": self.cfg.ptt_hang_ms}
 
     # ------------------------------------------------------------ clients
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -389,12 +408,18 @@ class StationService:
             for chunk in P.chunk_for_keyer(text):
                 self.link.send("T:" + chunk)
         elif t == "ptt":
-            on = bool(msg.get("on"))
-            self.link.send("P:1" if on else "P:0")
-            if not on:
-                self.link.send("X")
-            self.ptt = on
-            log.info("PTT %s", "ON" if on else "off")
+            if msg.get("on"):
+                self.link.send("P:1")      # also cancels a release in progress
+                self.ptt = True
+                self.releasing = False
+                log.info("PTT ON")
+            elif self.ptt and not self.releasing:
+                # graceful: the Nano keys out whatever is queued, holds PTT for the
+                # hang time (restarted by any CW that arrives), then reports P:0
+                self.link.send("P:0")
+                self.releasing = True
+                log.info("PTT release requested: finishing queued CW, then %d ms hang",
+                         self.cfg.ptt_hang_ms)
             await sess.send(self._state())
         elif t == "wpm":
             try:
@@ -409,12 +434,17 @@ class StationService:
                 ms = max(0, min(self.cfg.max_tune_ms, int(msg.get("ms"))))
             except (TypeError, ValueError):
                 return
-            if not self.ptt:
+            if not self.ptt or self.releasing:
                 await sess.send({"t": "log", "msg": "tune ignored: PTT is off"})
                 return
             self.link.send(f"U:{ms}")
         elif t == "abort":
-            self.link.send("X")
+            if self.releasing:
+                # Esc during a release: stop now rather than wait out the hang
+                self._safe_off("abort during PTT release")
+                await sess.send(self._state())
+            else:
+                self.link.send("X")
         elif t == "tlmq":
             snap = self.tlm.snapshot() if self.tlm else None
             await sess.send(snap or {"t": "log", "msg": "no tower telemetry"})

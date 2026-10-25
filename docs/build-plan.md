@@ -70,6 +70,8 @@ client and station talk to each other from outside the house.
 - [ ] Choose iambic A or B; swap paddles if needed (`config.h`)
 - [ ] Deliberately fumbled characters pass through as raw patterns (`{...}`)
 - [ ] PTT button toggles station PTT; the D12 PTT LED lights at both ends
+- [ ] Send a word and press PTT off right after the last character: it is keyed out in full, PTT drops about 2 s after the last element
+- [ ] Press PTT off, then keep sending within 2 s: PTT stays on and everything is keyed
 
 **Done when:** a few minutes of normal sending comes out clean on the station side,
 and the PTT button and LED behave.

@@ -81,14 +81,40 @@ class SerialLink:
 
 
 class FakeLink:
-    """In-memory keyer for tests and --dry-run. Records everything sent."""
+    """In-memory keyer for tests and --dry-run. Records everything sent.
+
+    Emulates the station Nano's PTT reporting: P:1 reports "P:1"; P:0 reports
+    "P:0" after the hang time (J:<ms>, default 2000; no CW is really queued);
+    O reports "P:0" at once.
+    """
 
     def __init__(self) -> None:
         self.sent: list[str] = []
         self._handler: Callable[[str], None] = lambda line: None
+        self.ptt = False
+        self.hang_s = 2.0
+        self._release: asyncio.TimerHandle | None = None
 
     def set_handler(self, handler: Callable[[str], None]) -> None:
         self._handler = handler
+
+    def _report(self, line: str, delay: float = 0.0) -> asyncio.TimerHandle | None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._handler(line)
+            return None
+        return loop.call_later(delay, self._handler, line)
+
+    def _cancel_release(self) -> None:
+        if self._release is not None:
+            self._release.cancel()
+            self._release = None
+
+    def _released(self) -> None:
+        self._release = None
+        self.ptt = False
+        self._handler("P:0")
 
     def send(self, line: str) -> None:
         self.sent.append(line)
@@ -96,6 +122,24 @@ class FakeLink:
             log.info("[dry-run keyer] %s", line)
         if line == "V":
             self._handler("V:remkey fake")
+        elif line.startswith("J:"):
+            self.hang_s = int(line[2:]) / 1000.0
+        elif line == "P:1":
+            self._cancel_release()
+            if not self.ptt:
+                self.ptt = True
+                self._report("P:1")
+        elif line == "P:0":
+            if self.ptt and self._release is None:
+                try:
+                    self._release = asyncio.get_running_loop().call_later(self.hang_s, self._released)
+                except RuntimeError:
+                    self._released()
+        elif line == "O":
+            self._cancel_release()
+            if self.ptt:
+                self.ptt = False
+                self._report("P:0")
 
     def inject(self, line: str) -> None:
         """Pretend the keyer sent us a line."""

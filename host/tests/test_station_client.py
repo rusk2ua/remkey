@@ -35,7 +35,7 @@ async def wait_for(cond, timeout=3.0):
 @pytest.fixture
 async def station():
     cfg = StationConfig(secret=SECRET, listen_host="127.0.0.1", listen_port=0,
-                        heartbeat_timeout_s=0.5, log_file="")
+                        heartbeat_timeout_s=0.5, log_file="", ptt_hang_ms=300)
     link = FakeLink()
     svc = StationService(cfg, link)
     await svc.start()
@@ -80,7 +80,7 @@ async def test_ptt_cw_and_disconnect_safety(station):
     link.sent.clear()
     writer.close()
     await wait_for(lambda: svc.session is None)
-    assert link.sent[-2:] == ["X", "P:0"]
+    assert link.sent[-1] == "O"                # safety stop: immediate, no release hang
     assert not svc.ptt
 
 
@@ -93,7 +93,7 @@ async def test_heartbeat_loss_drops_ptt(station):
     # go silent; timeout is 0.5 s in the fixture
     await wait_for(lambda: svc.session is None, timeout=2.0)
     assert not svc.ptt
-    assert "P:0" in link.sent
+    assert link.sent[-1] == "O"
     writer.close()
 
 
@@ -194,3 +194,96 @@ async def test_client_reconnects_and_drops_paddle_when_offline(station):
     await wait_for(lambda: app.connected, timeout=3)   # reconnected
     app.quit.set()
     await asyncio.wait_for(task, 3)
+
+
+# ----------------------------------------------------------------- graceful PTT release
+async def next_msg(reader, t, pred=lambda m: True):
+    while True:
+        m = P.decode(await asyncio.wait_for(reader.readline(), 3))
+        if m["t"] == t and pred(m):
+            return m
+
+
+async def test_ptt_off_is_graceful_and_reported_by_nano(station):
+    svc, link = station
+    assert link.sent[:3] == ["G:1", "J:300", "O"]
+    reader, writer, _ = await raw_connect(svc.port)
+    await next_msg(reader, "state")
+    writer.write(P.encode({"t": "ptt", "on": True}))
+    await writer.drain()
+    await next_msg(reader, "state", lambda m: m["ptt"])
+    writer.write(P.encode({"t": "cw", "text": "TU"}))
+    writer.write(P.encode({"t": "ptt", "on": False}))
+    await writer.drain()
+    m = await next_msg(reader, "state", lambda m: m["releasing"])
+    assert m["ptt"] is True and m["hang_ms"] == 300
+    assert "X" not in link.sent and "O" not in link.sent[3:]     # nothing flushed
+    assert link.sent.index("T:TU") < link.sent.index("P:0")       # CW queued ahead of release
+    t0 = asyncio.get_running_loop().time()
+    m = await next_msg(reader, "state", lambda m: not m["ptt"])   # Nano reported P:0
+    assert asyncio.get_running_loop().time() - t0 >= 0.25
+    assert m["releasing"] is False and not svc.ptt
+    # a second PTT-off while already off sends nothing to the Nano
+    n = len(link.sent)
+    writer.write(P.encode({"t": "ptt", "on": False}))
+    await writer.drain()
+    await next_msg(reader, "state")
+    assert [x for x in link.sent[n:] if x != "H"] == []
+    writer.close()
+
+
+async def test_ptt_on_during_release_keeps_transmitting(station):
+    svc, link = station
+    svc.cfg.heartbeat_timeout_s = 3.0                         # this test sends no heartbeats
+    reader, writer, _ = await raw_connect(svc.port)
+    writer.write(P.encode({"t": "ptt", "on": True}))
+    writer.write(P.encode({"t": "ptt", "on": False}))
+    writer.write(P.encode({"t": "ptt", "on": True}))
+    await writer.drain()
+    await asyncio.sleep(0.6)                                       # past the 300 ms hang
+    assert svc.ptt and not svc.releasing and link.ptt
+    writer.close()
+
+
+async def test_abort_during_release_is_immediate(station):
+    svc, link = station
+    svc.cfg.heartbeat_timeout_s = 3.0
+    reader, writer, _ = await raw_connect(svc.port)
+    writer.write(P.encode({"t": "ptt", "on": True}))
+    writer.write(P.encode({"t": "ptt", "on": False}))
+    await writer.drain()
+    await wait_for(lambda: svc.releasing)
+    writer.write(P.encode({"t": "abort"}))
+    await writer.drain()
+    await wait_for(lambda: not svc.ptt)
+    assert link.sent[-1] == "O" or "O" in link.sent[-3:]
+    writer.close()
+
+
+async def test_client_shows_release_and_quit_waits_for_it(station):
+    svc, slink = station
+    svc.cfg.heartbeat_timeout_s = 3.0
+    ccfg = ClientConfig(secret=SECRET, station_host="127.0.0.1", station_port=svc.port,
+                        reconnect_s=0.1, heartbeat_s=0.1)
+    out = NullOut()
+    app = ClientApp(ccfg, FakeLink(), Console(out))
+    task = asyncio.create_task(app.run())
+    await wait_for(lambda: app.connected)
+
+    app.on_key("\x14")                                       # PTT on
+    await wait_for(lambda: app.station_ptt)
+    app.on_key("\x14")                                       # PTT off -> releasing
+    await wait_for(lambda: app.releasing)
+    assert "STATION PTT releasing: finishing queued CW, then 0.3 s" in out.text
+    app.on_key("\x14")                                       # pressed again: stay on
+    await wait_for(lambda: not app.releasing)
+    await asyncio.sleep(0.5)
+    assert app.station_ptt and svc.ptt
+
+    # quit with PTT on: the client asks for a release and waits for it, so the
+    # station is never cut off by the disconnect safety stop
+    app.on_key("\x11")
+    await asyncio.wait_for(task, 3)
+    assert "waiting for the station to finish sending" in out.text
+    assert "O" not in slink.sent[3:]                         # no immediate drop happened
+    assert not svc.ptt

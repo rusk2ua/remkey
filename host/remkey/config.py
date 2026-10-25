@@ -16,6 +16,7 @@ class StationConfig:
     keyer_port: str = "COM7"
     keyer_baud: int = 115200
     heartbeat_timeout_s: float = 3.0  # no client traffic this long -> PTT off, flush
+    ptt_hang_ms: int = 2000           # after PTT off: finish queued CW, then hold PTT this long
     wpm_offset: int = 2               # station sends a bit faster so its buffer drains
     max_tune_ms: int = 15000
     max_text_chars: int = 512

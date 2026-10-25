@@ -50,6 +50,8 @@
 #define TUNE_MAX_MS      30000UL  // hard cap on a tune carrier
 #define QUEUE_SIZE       128      // text buffer (bytes)
 #define WDOG_MS          3000UL   // no host traffic for this long -> PTT/key off
+#define PTT_HANG_MS      2000UL   // after "P:0": finish queued CW, then hold PTT this long
+                                  //   (station service can change it with J:<ms>)
 
 #if REMKEY_ROLE == ROLE_CLIENT
   #define USE_SPEED_POT        0  // set to 1 once a pot is wired to A0

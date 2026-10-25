@@ -15,6 +15,11 @@ keyer_baud = 115200
 # No traffic from the client for this long -> PTT off, queued text flushed.
 heartbeat_timeout_s = 3.0
 
+# After you turn PTT off, the station keys out any queued CW, then holds PTT this
+# long (any CW arriving meanwhile is sent and restarts the hold). Safety stops
+# (link lost, heartbeat lost, Nano watchdog) are always immediate.
+ptt_hang_ms = 2000
+
 # Station re-keys a little faster than you send so its buffer never piles up.
 wpm_offset = 2
 

@@ -5,6 +5,20 @@ firmware and the remtlm telemetry firmware each carry their own version.
 
 ## 2026-10-25
 
+### remkey firmware 0.3.0
+- PTT-off is a graceful release: queued CW is keyed out, then PTT is held for
+  `PTT_HANG_MS` (2 s; the station service sets it with `J:<ms>`), restarted by any
+  CW arriving meanwhile. `O` drops PTT immediately; the watchdog stays immediate.
+- The Nano reports actual PTT output changes (`P:1` / `P:0`).
+- Client: the PTT button reports a just-finished character before `B:P`.
+
+### Host package 0.4.0
+- Station: graceful release via the Nano; safety stops use `O`; `ptt_hang_ms` in
+  `station.toml`; PTT state comes from the Nano's reports; Esc during a release
+  drops PTT at once.
+- Client: shows "releasing"; PTT pressed during a release keeps PTT on; quitting
+  waits for the release (Ctrl-Q twice to force).
+
 ### remkey firmware 0.2.0
 - On-board LED (D13) flashes with the CW being sent on both roles; polarity set by
   `LED_ACTIVE_LOW` (default 1).

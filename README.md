@@ -240,15 +240,15 @@ This requires an AnyDesk plan that includes TCP tunneling.
 
 | Key | Action |
 |---|---|
-| PTT button on the keyer, or **Ctrl-T** | Toggle station PTT (the D12 PTT LED lights when the station confirms) |
-| **Esc** | Abort queued text and any tune carrier |
+| PTT button on the keyer, or **Ctrl-T** | Toggle station PTT (the D12 PTT LED lights when the station confirms). Turning PTT off is a graceful release (see below). Pressing it again during the release keeps PTT on. |
+| **Esc** | Abort queued text and any tune carrier. During a release, also drops PTT immediately. |
 | **Ctrl-U** | Tune carrier (`tune_ms`, capped by the station). Needs PTT on. |
 | **Ctrl-F / Ctrl-S** | Speed +1 / −1 WPM, both ends |
 | **Ctrl-G** | Status: link, PTT, WPM, round-trip time (plus tower telemetry if fitted) |
 | **Ctrl-P** | Tower: PA power, transverter power, temperatures, 10 MHz reference lock |
 | **Ctrl-K** | Tower: Kuhne MKU 10 G5 status (`s`) and firmware version (`v`) |
 | **Ctrl-V** | Tower: supply voltage and current, measured cable resistance and drop |
-| **Ctrl-Q / Ctrl-C** | Quit. PTT is dropped first. |
+| **Ctrl-Q / Ctrl-C** | Quit. With PTT on, it first lets the station finish sending and release PTT (up to 15 s). Press again to quit at once. |
 | Typing | Sent as CW. Enter sends a space. `<SK>`, `<AR>`, `<BT>`, `<KN>` send prosigns. |
 
 ### A typical 10 GHz QSO
@@ -256,7 +256,17 @@ This requires an AnyDesk plan that includes TCP tunneling.
 1. In AnyDesk, set the frequency and point the dish with GH Everyware as usual.
 2. Press the PTT button. Wait for the PTT LED (station confirmed), then wait for the tower sequencer as you would locally.
 3. Send with the paddle. Your local sidetone paces you; the remote audio lets you confirm.
-4. Press the PTT button again to receive. Any queued text is flushed the moment PTT drops.
+4. Press the PTT button again when you've finished sending. You don't need to wait for the station to catch up: it keys out everything still queued, holds PTT for 2 s more, then drops it. The client shows `STATION PTT releasing` until then, and the PTT LED stays lit.
+
+### PTT release
+
+The station runs about one character behind you, so pressing PTT off right after your last character would otherwise cut it short. Instead, PTT-off is a graceful release:
+
+- The station Nano keys out everything already queued, then holds PTT for `ptt_hang_ms` (2000 ms by default, set in `station.toml`).
+- Any CW that arrives during the hold (a character still in flight from the paddle, or you deciding to keep sending) is keyed and restarts the hold. **PTT never drops while CW is still being sent.** There is no upper limit; the hold ends only when nothing has been sent for the hang time.
+- Pressing PTT again during the hold keeps PTT on. **Esc** during the hold drops PTT at once.
+- The client Nano reports a character you've just finished before the PTT button press, so it reaches the station ahead of the release.
+- The safety stops below are never delayed by the hold.
 
 ### Audio
 
@@ -264,15 +274,16 @@ The receive audio path is independent of remkey. The zero-setup option is AnyDes
 
 ### Safety layers
 
-Every one of these drops PTT and flushes queued text:
+Every one of these drops PTT and flushes queued text **immediately**, with no release hold:
 
 | Event | Where |
 |---|---|
-| Client quits | client sends PTT off |
 | TCP connection closes or errors | station service |
 | No heartbeat from the client for 3 s (dead hotel Wi-Fi, laptop sleeps) | station service |
 | Station service or PC hangs, USB unplugged | station Nano watchdog (3 s) |
 | Tune carrier | capped by the service (`max_tune_ms`) and the firmware (30 s hard cap) |
+
+Quitting the client is not on this list: it requests a normal release and waits for it (up to 15 s, or press Ctrl-Q again).
 
 Paddle characters sent while the link is down are **dropped**, not buffered, so stale CW never goes out minutes later.
 

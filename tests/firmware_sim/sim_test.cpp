@@ -61,6 +61,8 @@ static void reset() {
   paddleKeysOut = DEFAULT_PADDLE_OUT;
   wdogEnabled = DEFAULT_WDOG;
   pttOn = ledOn = keyDown = false;
+  relPending = relHang = false;
+  pttHangMs = PTT_HANG_MS;
   setup();
   Serial.out.clear();
 }
@@ -287,6 +289,118 @@ static void test_client_paddle_does_not_key_rig() {
 #endif
 }
 
+static size_t countOf(const char *needle) {
+  size_t n = 0, pos = 0;
+  while ((pos = Serial.out.find(needle, pos)) != std::string::npos) { n++; pos += strlen(needle); }
+  return n;
+}
+
+// P:0 is a graceful release: queued CW finishes, then PTT is held 2 s more.
+static void test_ptt_release() {
+  std::printf("ptt graceful release\n");
+  reset();
+  send("G:0");
+  send("W:20");
+  send("P:1");
+  CHECK(sim.pinOut[PIN_PTT_OUT] == HIGH && countOf("P:1\r\n") == 1, "PTT on / report");
+  send("T:CQ CQ");                       // 7 + 7 + 7 units + spaces: about 1.9 s at 20 WPM
+  step(200);
+  send("P:0");                           // operator lets go while CW is still queued
+  bool dropped_early = false;
+  uint32_t t0 = sim.now;
+  while (!(qLen == 0 && tState == T_IDLE)) {
+    step();
+    if (sim.pinOut[PIN_PTT_OUT] == LOW) dropped_early = true;
+    if (sim.now - t0 > 5000) break;
+  }
+  CHECK(!dropped_early, "PTT dropped while CW was still being sent");
+  uint32_t drained = sim.now;
+  until([] { return sim.pinOut[PIN_PTT_OUT] == LOW; }, 5000);
+  uint32_t hang = sim.now - drained;
+  CHECK(hang >= 1995 && hang <= 2010, "hang %u ms", hang);
+  CHECK(countOf("P:0\r\n") == 1, "P:0 report missing");
+
+  // CW arriving during the hang is keyed and restarts the hold
+  reset();
+  send("G:0");
+  send("W:20");
+  send("P:1");
+  send("P:0");                           // nothing queued: hang starts at once
+  step(1500);
+  CHECK(sim.pinOut[PIN_PTT_OUT] == HIGH, "dropped before hang ended");
+  send("T:K");                           // late character (e.g. last one off the paddle)
+  until([] { return keyDown; }, 50);
+  CHECK(keyDown && sim.pinOut[PIN_PTT_OUT] == HIGH, "late character not keyed with PTT");
+  until([] { return qLen == 0 && tState == T_IDLE; }, 2000);
+  uint32_t t1 = sim.now;
+  until([] { return sim.pinOut[PIN_PTT_OUT] == LOW; }, 5000);
+  CHECK(sim.now - t1 >= 1995, "hang not restarted after late CW (%u ms)", sim.now - t1);
+
+  // P:1 during the hang cancels the release
+  reset();
+  send("G:0");
+  send("P:1");
+  send("P:0");
+  step(1000);
+  send("P:1");
+  step(5000);
+  CHECK(sim.pinOut[PIN_PTT_OUT] == HIGH, "P:1 did not cancel the release");
+
+  // O drops immediately and flushes text
+  send("T:CQ CQ CQ");
+  step(100);
+  send("O");
+  CHECK(sim.pinOut[PIN_PTT_OUT] == LOW && qLen == 0 && !keyDown, "O not immediate");
+
+  // watchdog is immediate even during a release
+  reset();
+  send("G:1");
+  send("P:1");
+  send("T:CQ CQ CQ CQ CQ CQ");
+  send("P:0");
+  step(3100);                            // no host traffic
+  CHECK(sim.pinOut[PIN_PTT_OUT] == LOW && qLen == 0, "watchdog did not override release");
+
+  // J sets the hang time
+  reset();
+  send("G:0");
+  send("J:500");
+  send("P:1");
+  send("P:0");
+  step(400);
+  CHECK(sim.pinOut[PIN_PTT_OUT] == HIGH, "J:500 dropped too early");
+  step(200);
+  CHECK(sim.pinOut[PIN_PTT_OUT] == LOW, "J:500 did not drop");
+
+  // P:0 with PTT already off does nothing
+  reset();
+  send("P:0");
+  CHECK(!relPending && countOf("P:0") == 0, "P:0 while off had an effect");
+}
+
+#if REMKEY_ROLE == ROLE_CLIENT
+// The PTT button flushes a finished-but-unreported character first.
+static void test_button_flushes_char() {
+  std::printf("ptt button flushes pending char\n");
+  reset();
+  send("W:20");
+  sim.pinIn[PIN_DAH] = LOW;              // T
+  until([] { return sounding(); }, 100);
+  step(20);
+  sim.pinIn[PIN_DAH] = HIGH;
+  until([] { return pState == P_IDLE; }, 500);
+  CHECK(dLen == 1, "char not pending (dLen %d)", dLen);
+  sim.pinIn[PIN_PTT_BTN] = LOW;          // press within 2 dits of the last element
+  step(30);
+  size_t k = Serial.out.find("K:T"), b = Serial.out.find("B:P");
+  CHECK(k != std::string::npos && b != std::string::npos && k < b, "K:T not before B:P: %s",
+        Serial.out.c_str());
+  sim.pinIn[PIN_PTT_BTN] = HIGH;
+  step(100);
+  CHECK(countOf("K:T") == 1, "char reported twice");
+}
+#endif
+
 // On-board LED mirrors every keyed element (active-low by default); PTT goes to D12.
 static void test_leds() {
   std::printf("leds\n");
@@ -308,7 +422,7 @@ static void test_leds() {
   send("G:0");
   send("P:1");
   CHECK(sim.pinOut[PIN_PTT_LED] == HIGH && sim.pinOut[PIN_LED] == off, "PTT LED wrong");
-  send("P:0");
+  send("O");
   send("L:1");
   CHECK(sim.pinOut[PIN_PTT_LED] == HIGH, "L:1 did not light PTT LED");
   send("L:0");
@@ -319,7 +433,7 @@ static void test_status() {
   std::printf("status/version\n");
   reset();
   send("?");
-  CHECK(Serial.out.find("S:v=0.2.0") != std::string::npos, "status: %s", Serial.out.c_str());
+  CHECK(Serial.out.find("S:v=0.3.0") != std::string::npos, "status: %s", Serial.out.c_str());
   send("V");
   CHECK(Serial.out.find("V:remkey") != std::string::npos, "version missing");
 }
@@ -339,6 +453,10 @@ int main() {
   test_ptt_button();
   test_client_paddle_does_not_key_rig();
   test_leds();
+  test_ptt_release();
+#if REMKEY_ROLE == ROLE_CLIENT
+  test_button_flushes_char();
+#endif
   test_status();
   std::printf(failures ? "FAILED: %d\n" : "ALL PASSED\n", failures);
   return failures ? 1 : 0;

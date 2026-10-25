@@ -71,6 +71,9 @@ class ClientApp:
         self.connected = False
         self.rtt_ms: float | None = None
         self.quit = asyncio.Event()
+        self.force_quit = asyncio.Event()
+        self.releasing = False               # station finishing CW before dropping PTT
+        self.quit_wait_s = 15.0              # longest a quit waits for that
         self._writer: asyncio.StreamWriter | None = None
         self._typed = ""     # buffer for <PROSIGN> typing
         self.tlm: dict | None = None
@@ -101,7 +104,8 @@ class ClientApp:
         self.console.cw(text)
 
     def toggle_ptt(self) -> None:
-        want = not self.station_ptt
+        # during a release, pressing PTT again keeps the transmitter on
+        want = not (self.station_ptt and not self.releasing)
         if not self._send({"t": "ptt", "on": want}):
             self.console.event("PTT ignored: no station link")
             return
@@ -247,6 +251,8 @@ class ClientApp:
                     else:
                         self.console.event("tower supply needs the station link")
             elif key in ("Q", "C"):
+                if self.quit.is_set():
+                    self.force_quit.set()        # second Ctrl-Q: don't wait for the release
                 self.quit.set()
             return
         if ch in ("\r", "\n"):
@@ -281,7 +287,7 @@ class ClientApp:
         self._send({"t": "wpm", "v": self.wpm})
         hb = asyncio.create_task(self._heartbeat())
         try:
-            while not self.quit.is_set():
+            while True:                       # ended by cancel (quit) or disconnect
                 line = await reader.readline()
                 if not line:
                     raise ConnectionError("station closed the connection")
@@ -303,8 +309,14 @@ class ClientApp:
         t = msg.get("t")
         if t == "state":
             was = self.station_ptt
+            was_rel = self.releasing
             self.station_ptt = bool(msg.get("ptt"))
+            self.releasing = bool(msg.get("releasing")) and self.station_ptt
             self.link.send(f"L:{1 if self.station_ptt else 0}")
+            if self.releasing and not was_rel:
+                hang = msg.get("hang_ms", 2000) / 1000
+                self.console.event(f"STATION PTT releasing: finishing queued CW, then {hang:g} s"
+                                   " (PTT again to stay on, Esc to stop now)")
             if was != self.station_ptt:
                 self.console.event(f"STATION PTT {'ON' if self.station_ptt else 'off'}")
                 if self.station_ptt:
@@ -371,12 +383,29 @@ class ClientApp:
         self._tx_peak = None
         self._tx_pwr = None
 
+    async def _release_before_quit(self, writer: asyncio.StreamWriter, sess: asyncio.Task) -> None:
+        """Quitting with PTT on: let the station finish sending and drop PTT itself."""
+        if not self.releasing:
+            self._send({"t": "ptt", "on": False})
+        self.console.event("waiting for the station to finish sending and release PTT"
+                           " (Ctrl-Q again to quit now)")
+        try:
+            await writer.drain()
+        except (ConnectionError, RuntimeError):
+            return
+        loop = asyncio.get_running_loop()
+        end = loop.time() + self.quit_wait_s
+        while (self.station_ptt and not self.force_quit.is_set() and not sess.done()
+               and loop.time() < end):
+            await asyncio.sleep(0.05)
+
     def _on_disconnect(self) -> None:
         self.connected = False
         self._writer = None
         if self.station_ptt:
             self.console.event("link lost - station drops PTT on its own")
         self.station_ptt = False
+        self.releasing = False
         self.link.send("L:0")
 
     async def run(self) -> None:
@@ -397,9 +426,8 @@ class ClientApp:
                 if sess in done:
                     sess.result()   # re-raise the disconnect reason
                 else:
-                    if self.station_ptt:
-                        self._send({"t": "ptt", "on": False})
-                        await writer.drain()
+                    if self.station_ptt and self.connected:
+                        await self._release_before_quit(writer, sess)
                     sess.cancel()
             except (TimeoutError, OSError, ConnectionError, ValueError) as exc:
                 self.console.event(f"station link: {exc or type(exc).__name__}")

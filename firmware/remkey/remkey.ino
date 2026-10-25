@@ -8,6 +8,9 @@
 //   STATION (shack end):  receives text ("T:...") from the host and re-keys it
 //           with exact timing on an optocoupler wired to the radio's KEY jack.
 //           "P:1"/"P:0" drive a second optocoupler on the radio's PTT/SEND line.
+//           "P:0" is a graceful release: queued CW is keyed out first, then PTT is
+//           held for PTT_HANG_MS (2 s) more; any CW arriving meanwhile is keyed and
+//           restarts the hold. "O" (and the watchdog) drop PTT immediately.
 //           A watchdog drops PTT and stops keying if the host goes quiet.
 //
 // Serial protocol (115200 baud, newline-terminated lines):
@@ -16,9 +19,13 @@
 //   W:<wpm>    set speed                       "K:{.-..-}" = unrecognised pattern)
 //   F:<hz>     sidetone frequency     B:P      PTT button pressed
 //   M:<0|1>    sidetone on/off        W:<wpm>  speed pot changed
-//   P:<0|1>    PTT output             D        text queue drained / tune ended
+//   P:1        PTT on                 D        text queue drained / tune ended
+//   P:0        PTT off after queued   P:<0|1>  PTT output actually changed
+//              CW + hang time
 //   L:<0|1>    PTT LED (D12)          !:WDOG   watchdog fired (PTT + key dropped)
 //   U:<ms>     tune carrier (capped)  E:<msg>  error
+//   O          abort text, PTT off now
+//   J:<ms>     PTT hang time (0-10000)
 //   X          abort text/tune        S:...    status (reply to ?)
 //   H          heartbeat              V:...    version (reply to V, and at boot)
 //   G:<0|1>    watchdog on/off
@@ -31,7 +38,7 @@
 #include "config.h"
 #include "keyer_types.h"
 
-#define FW_VERSION "0.2.0"
+#define FW_VERSION "0.3.0"
 
 // ---------------------------------------------------------------------------
 // Morse table
@@ -120,7 +127,19 @@ static void updateLed() {
   digitalWrite(PIN_PTT_LED, (ledOn || pttOn) ? HIGH : LOW);
 }
 
+static bool relPending = false;   // P:0 received; waiting for CW to finish + hang
+static bool relHang = false;      // hang timer running
+static uint32_t relHangEnd = 0;
+static uint32_t pttHangMs = PTT_HANG_MS;
+
 static void setPtt(bool on) {
+  if (!on) {
+    relPending = false;
+    relHang = false;
+  }
+  if (on != pttOn) {
+    Serial.println(on ? F("P:1") : F("P:0"));   // report actual changes to the host
+  }
   pttOn = on;
   digitalWrite(PIN_PTT_OUT, on ? HIGH : LOW);
   updateLed();
@@ -363,7 +382,13 @@ static void serviceButton(uint32_t now) {
   }
   if (now - btnChange > 25 && r != btnStable) {
     btnStable = r;
-    if (r == LOW) Serial.println(F("B:P"));
+    if (r == LOW) {
+      // A character just finished on the paddle but not yet reported (the decoder
+      // waits for 2 dits of silence): report it now so it reaches the station
+      // ahead of the PTT change.
+      if (pState == P_IDLE && dLen > 0) emitDecoded();
+      Serial.println(F("B:P"));
+    }
   }
 }
 
@@ -397,7 +422,7 @@ static void printStatus() {
   Serial.print(F(" wpm="));
   Serial.print(wpm);
   Serial.print(F(" ptt="));
-  Serial.print(pttOn ? 1 : 0);
+  Serial.print(pttOn ? (relPending ? 2 : 1) : 0);   // 2 = releasing
   Serial.print(F(" key="));
   Serial.print(keyDown ? 1 : 0);
   Serial.print(F(" q="));
@@ -432,7 +457,25 @@ static void handleLine(const char *s) {
       break;
     }
     case 'M': sidetoneOn = (atoi(arg) != 0); if (!sidetoneOn) noTone(PIN_SIDETONE); break;
-    case 'P': setPtt(atoi(arg) != 0); break;
+    case 'P':
+      if (atoi(arg) != 0) {
+        relPending = false;          // PTT on (also cancels a pending release)
+        relHang = false;
+        setPtt(true);
+      } else if (pttOn) {
+        relPending = true;           // finish queued CW, then hang, then off
+        relHang = false;
+      }
+      break;
+    case 'O':
+      abortText();
+      setPtt(false);
+      break;
+    case 'J': {
+      long ms = atol(arg);
+      if (ms >= 0 && ms <= 10000) pttHangMs = (uint32_t)ms;
+      break;
+    }
     case 'L': ledOn = (atoi(arg) != 0); updateLed(); break;
     case 'U': {
       unsigned long ms = strtoul(arg, 0, 10);
@@ -474,6 +517,23 @@ static void serviceSerial() {
   }
 }
 
+// Graceful PTT release: wait until nothing is being keyed or queued, then hold
+// PTT for pttHangMs. New CW during the hold restarts the wait.
+static void serviceRelease(uint32_t now) {
+  if (!relPending) return;
+  bool busy = tState != T_IDLE || qLen > 0 || pState != P_IDLE;
+  if (busy) {
+    relHang = false;
+    return;
+  }
+  if (!relHang) {
+    relHang = true;
+    relHangEnd = now + pttHangMs;
+    return;
+  }
+  if ((int32_t)(now - relHangEnd) >= 0) setPtt(false);
+}
+
 static void serviceWatchdog(uint32_t now) {
   if (!wdogEnabled) return;
   if (!(pttOn || tState != T_IDLE || qLen > 0)) return;
@@ -512,6 +572,7 @@ void loop() {
   servicePaddle(now);
   serviceText(now);
   serviceButton(now);
+  serviceRelease(now);
 #if USE_SPEED_POT
   servicePot(now);
 #endif

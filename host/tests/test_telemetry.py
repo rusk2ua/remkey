@@ -124,7 +124,7 @@ def test_link_stats_loss_and_reset():
 @pytest.fixture
 async def station_tlm(tmp_path):
     cfg = StationConfig(secret=SECRET, listen_host="127.0.0.1", listen_port=0,
-                        heartbeat_timeout_s=2.0, log_file="",
+                        heartbeat_timeout_s=2.0, log_file="", ptt_hang_ms=200,
                         pa_cal=[[0, 0], [5000, 10]], temp_warn_c=60,
                         tlm_stale_s=0.3, tlm_csv=str(tmp_path / "tlm.csv"))
     link, tlink = FakeLink(), FakeLink()
