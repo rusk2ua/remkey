@@ -17,7 +17,7 @@
 //   F:<hz>     sidetone frequency     B:P      PTT button pressed
 //   M:<0|1>    sidetone on/off        W:<wpm>  speed pot changed
 //   P:<0|1>    PTT output             D        text queue drained / tune ended
-//   L:<0|1>    LED                    !:WDOG   watchdog fired (PTT + key dropped)
+//   L:<0|1>    PTT LED (D12)          !:WDOG   watchdog fired (PTT + key dropped)
 //   U:<ms>     tune carrier (capped)  E:<msg>  error
 //   X          abort text/tune        S:...    status (reply to ?)
 //   H          heartbeat              V:...    version (reply to V, and at boot)
@@ -31,7 +31,7 @@
 #include "config.h"
 #include "keyer_types.h"
 
-#define FW_VERSION "0.1.0"
+#define FW_VERSION "0.2.0"
 
 // ---------------------------------------------------------------------------
 // Morse table
@@ -102,9 +102,14 @@ static void setWpm(int w) {
 }
 
 // Key the line. driveOutput=false keeps the radio optocoupler off (sidetone only).
+static void cwLed(bool on) {
+  digitalWrite(PIN_LED, (on != (bool)LED_ACTIVE_LOW) ? HIGH : LOW);
+}
+
 static void keyLine(bool down, bool driveOutput) {
   keyDown = down;
   digitalWrite(PIN_KEY_OUT, (down && driveOutput) ? HIGH : LOW);
+  cwLed(down);             // on-board LED follows every element sent, on both roles
   if (sidetoneOn) {
     if (down) tone(PIN_SIDETONE, toneHz);
     else noTone(PIN_SIDETONE);
@@ -112,7 +117,7 @@ static void keyLine(bool down, bool driveOutput) {
 }
 
 static void updateLed() {
-  digitalWrite(PIN_LED, (ledOn || pttOn) ? HIGH : LOW);
+  digitalWrite(PIN_PTT_LED, (ledOn || pttOn) ? HIGH : LOW);
 }
 
 static void setPtt(bool on) {
@@ -489,10 +494,12 @@ void setup() {
   pinMode(PIN_KEY_OUT, OUTPUT);
   pinMode(PIN_PTT_OUT, OUTPUT);
   pinMode(PIN_LED, OUTPUT);
+  pinMode(PIN_PTT_LED, OUTPUT);
   pinMode(PIN_SIDETONE, OUTPUT);
   digitalWrite(PIN_KEY_OUT, LOW);
   digitalWrite(PIN_PTT_OUT, LOW);
-  digitalWrite(PIN_LED, LOW);
+  cwLed(false);
+  digitalWrite(PIN_PTT_LED, LOW);
   Serial.begin(115200);
   setWpm(DEFAULT_WPM);
   lastRxMs = millis();

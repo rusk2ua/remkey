@@ -65,11 +65,11 @@ client and station talk to each other from outside the house.
 
 - [ ] Flash the CLIENT image
 - [ ] Wire the paddle jack, PTT button and sidetone (speed pot optional: `USE_SPEED_POT 1`)
-- [ ] Send at 15–20 WPM: the station LED follows about one character behind
+- [ ] Send at 15–20 WPM: the station's on-board LED and KEY opto follow about one character behind
 - [ ] Decoded text in the client matches what was sent
 - [ ] Choose iambic A or B; swap paddles if needed (`config.h`)
 - [ ] Deliberately fumbled characters pass through as raw patterns (`{...}`)
-- [ ] PTT button toggles station PTT; LED follows the station's confirmation
+- [ ] PTT button toggles station PTT; the D12 PTT LED lights at both ends
 
 **Done when:** a few minutes of normal sending comes out clean on the station side,
 and the PTT button and LED behave.

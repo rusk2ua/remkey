@@ -287,11 +287,39 @@ static void test_client_paddle_does_not_key_rig() {
 #endif
 }
 
+// On-board LED mirrors every keyed element (active-low by default); PTT goes to D12.
+static void test_leds() {
+  std::printf("leds\n");
+  reset();
+  const int off = LED_ACTIVE_LOW ? HIGH : LOW, on = LED_ACTIVE_LOW ? LOW : HIGH;
+  CHECK(sim.pinOut[PIN_LED] == off, "LED not off after reset");
+  send("W:20");
+  send("T:E");
+  until([] { return keyDown; }, 100);
+  CHECK(sim.pinOut[PIN_LED] == on, "LED not on during text element");
+  until([] { return !keyDown; }, 200);
+  CHECK(sim.pinOut[PIN_LED] == off, "LED not off after text element");
+  sim.pinIn[PIN_DIT] = LOW;
+  until([] { return keyDown; }, 100);
+  CHECK(sim.pinOut[PIN_LED] == on, "LED not on during paddle element");
+  sim.pinIn[PIN_DIT] = HIGH;
+  step(200);
+  CHECK(sim.pinOut[PIN_LED] == off, "LED not off after paddle");
+  send("G:0");
+  send("P:1");
+  CHECK(sim.pinOut[PIN_PTT_LED] == HIGH && sim.pinOut[PIN_LED] == off, "PTT LED wrong");
+  send("P:0");
+  send("L:1");
+  CHECK(sim.pinOut[PIN_PTT_LED] == HIGH, "L:1 did not light PTT LED");
+  send("L:0");
+  CHECK(sim.pinOut[PIN_PTT_LED] == LOW, "L:0 did not clear PTT LED");
+}
+
 static void test_status() {
   std::printf("status/version\n");
   reset();
   send("?");
-  CHECK(Serial.out.find("S:v=0.1.0") != std::string::npos, "status: %s", Serial.out.c_str());
+  CHECK(Serial.out.find("S:v=0.2.0") != std::string::npos, "status: %s", Serial.out.c_str());
   send("V");
   CHECK(Serial.out.find("V:remkey") != std::string::npos, "version missing");
 }
@@ -310,6 +338,7 @@ int main() {
   test_paddle_aborts_text();
   test_ptt_button();
   test_client_paddle_does_not_key_rig();
+  test_leds();
   test_status();
   std::printf(failures ? "FAILED: %d\n" : "ALL PASSED\n", failures);
   return failures ? 1 : 0;

@@ -3,6 +3,13 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-10-25
+
+### remkey firmware 0.2.0
+- On-board LED (D13) flashes with the CW being sent on both roles; polarity set by
+  `LED_ACTIVE_LOW` (default 1).
+- PTT indication moved to an optional external LED on D12.
+
 ## 2026-10-21 (later)
 
 ### remtlm firmware 0.3.0

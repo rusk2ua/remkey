@@ -23,8 +23,16 @@
 #define PIN_SIDETONE   9    // sidetone square wave -> 220 ohm -> piezo/headphone amp
 #define PIN_KEY_OUT    10   // optocoupler LED for radio KEY line (station)
 #define PIN_PTT_OUT    11   // optocoupler LED for radio PTT/SEND line (station)
-#define PIN_LED        13   // on-board LED: PTT state
+#define PIN_LED        13   // on-board LED: flashes with the CW being sent (paddle or text)
+#define PIN_PTT_LED    12   // optional external LED: PTT on (station) / PTT confirmed (client)
+                            //   D12 -> 1k -> LED anode, cathode -> GND
 #define PIN_SPEED_POT  A0   // optional 10k speed pot wiper (ends to 5V and GND)
+
+// 1 if the on-board LED lights when PIN_LED is LOW (true on some Nano clones),
+// 0 if it lights when HIGH (genuine Arduino Nano). PIN_PTT_LED is always active-high.
+#ifndef LED_ACTIVE_LOW
+#define LED_ACTIVE_LOW 1
+#endif
 
 // ---------------------------------------------------------------------------
 // Keyer defaults

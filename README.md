@@ -94,10 +94,13 @@ PTT button ──────────────── D4 ── button ─
 D9 ── 220 Ω ── piezo(+)     piezo(−) ── GND
      (or D9 ── 220 Ω ── 100 µF ── small amp/headphone input; 10 k to GND for level)
 Optional speed pot: ends to 5V/GND, wiper ── A0
-LED on D13 lights when the STATION confirms PTT is on
+On-board LED (D13) flashes with every element you send
+Optional PTT LED: D12 ── 1k ── LED ── GND, lights when the STATION confirms PTT is on
 ```
 
 Swap paddles in `config.h` (`SWAP_PADDLES`) instead of rewiring.
+
+**LEDs (both roles):** the on-board LED (D13) flashes with the CW being sent: paddle elements on the client, re-keyed text on the station. `LED_ACTIVE_LOW` in `config.h` sets its polarity. It's 1 by default, for clones whose LED lights on LOW; set it to 0 for a genuine Nano. PTT state goes to an optional external LED on D12 (D12 ── 1 kΩ ── LED ── GND).
 
 ### Station Nano (shack)
 
@@ -237,7 +240,7 @@ This requires an AnyDesk plan that includes TCP tunneling.
 
 | Key | Action |
 |---|---|
-| PTT button on the keyer, or **Ctrl-T** | Toggle station PTT (the LED lights when the station confirms) |
+| PTT button on the keyer, or **Ctrl-T** | Toggle station PTT (the D12 PTT LED lights when the station confirms) |
 | **Esc** | Abort queued text and any tune carrier |
 | **Ctrl-U** | Tune carrier (`tune_ms`, capped by the station). Needs PTT on. |
 | **Ctrl-F / Ctrl-S** | Speed +1 / −1 WPM, both ends |
@@ -251,7 +254,7 @@ This requires an AnyDesk plan that includes TCP tunneling.
 ### A typical 10 GHz QSO
 
 1. In AnyDesk, set the frequency and point the dish with GH Everyware as usual.
-2. Press the PTT button. Wait for the LED (station confirmed), then wait for the tower sequencer as you would locally.
+2. Press the PTT button. Wait for the PTT LED (station confirmed), then wait for the tower sequencer as you would locally.
 3. Send with the paddle. Your local sidetone paces you; the remote audio lets you confirm.
 4. Press the PTT button again to receive. Any queued text is flushed the moment PTT drops.
 
@@ -279,7 +282,7 @@ Paddle characters sent while the link is down are **dropped**, not buffered, so 
 
 1. Station Nano on the PC, opto outputs to a multimeter (continuity) or LEDs, not the radio yet.
 2. Run the service, connect the client on the same LAN (`station_host` = the PC's LAN IP), and check:
-   - PTT button → PTT opto closes, client LED on.
+   - PTT button → PTT opto closes, D12 PTT LED on at both ends.
    - Paddle → KEY opto follows about one character behind; local sidetone is immediate.
    - Kill the client's Wi-Fi with PTT on → PTT opens within 3 s.
    - Stop the service with PTT on → the Nano opens PTT within 3 s (`!:WDOG`).
