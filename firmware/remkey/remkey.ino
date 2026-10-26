@@ -40,7 +40,7 @@
 #include "config.h"
 #include "keyer_types.h"
 
-#define FW_VERSION "0.4.0"
+#define FW_VERSION "0.4.1"
 
 // ---------------------------------------------------------------------------
 // Morse table
@@ -235,11 +235,12 @@ static uint32_t pEnd = 0;
 static uint32_t lastElemEnd = 0;
 static char dPat[MAX_PAT + 1];
 static uint8_t dLen = 0;
-static bool dOverflow = false;
 static bool wordPending = false;
 
 static bool ditPressed() { return digitalRead(SWAP_PADDLES ? PIN_DAH : PIN_DIT) == LOW; }
 static bool dahPressed() { return digitalRead(SWAP_PADDLES ? PIN_DIT : PIN_DAH) == LOW; }
+
+static void emitDecoded();
 
 static void startPaddleElement(Elem e, uint32_t now, bool fromIdle) {
   if (tState != T_IDLE || qLen > 0) {
@@ -250,8 +251,18 @@ static void startPaddleElement(Elem e, uint32_t now, bool fromIdle) {
   pEnd += (e == E_DAH) ? 3 * ditMs : ditMs;
   pState = P_ELEM;
   keyLine(true, paddleKeysOut);
-  if (dLen < MAX_PAT) dPat[dLen++] = (e == E_DAH) ? '-' : '.';
-  else dOverflow = true;
+  // Long element runs never get the 2-dit gap that ends a character, so they
+  // would sit in dPat until the paddle is released (and be cut at MAX_PAT).
+  // Send them on as they go instead:
+  //  - a 6th dah after "-----" can't be one character (0 is the longest
+  //    all-dah one), so the five go out as a 0 and the run starts again:
+  //    a held dah paddle is heard at the far end as 0 0 0 ... + the leftover.
+  //  - any other run that fills dPat goes out as a raw pattern and continues.
+  if ((e == E_DAH && dLen == 5 && memcmp(dPat, "-----", 5) == 0) || dLen >= MAX_PAT) {
+    emitDecoded();
+  }
+  dPat[dLen++] = (e == E_DAH) ? '-' : '.';
+  dPat[dLen] = 0;
   wordPending = false;
 }
 
@@ -267,7 +278,7 @@ static Elem chooseNext(bool useLatches) {
 
 static void emitDecoded() {
   dPat[dLen] = 0;
-  char c = dOverflow ? 0 : lookupChar(dPat);
+  char c = lookupChar(dPat);
   Serial.print(F("K:"));
   if (c) {
     Serial.println(c);
@@ -277,7 +288,7 @@ static void emitDecoded() {
     Serial.println('}');
   }
   dLen = 0;
-  dOverflow = false;
+  dPat[0] = 0;
   wordPending = true;
 }
 

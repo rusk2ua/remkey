@@ -276,6 +276,62 @@ static size_t countOf(const char *needle) {
   return n;
 }
 
+// Hold one paddle for exactly n elements (released partway through the n-th).
+// Returns true if a K: line had already been emitted before the release.
+static bool holdPaddle(int pin, int n) {
+  size_t before = Serial.out.size();
+  sim.pinIn[pin] = LOW;
+  for (int i = 0; i < n; i++) {
+    until([] { return sounding(); }, 1000);
+    if (i < n - 1) until([] { return !sounding(); }, 1000);
+  }
+  bool early = Serial.out.find("K:", before) != std::string::npos;
+  step(ditMs / 2);
+  sim.pinIn[pin] = HIGH;
+  until([] { return !sounding(); }, 1000);
+  step(10 * ditMs);       // let the last piece (and the word space) come out
+  return early;
+}
+
+static void test_long_runs_stream() {
+  std::printf("long element runs stream out\n");
+  struct { int n; const char *want; } dah[] = {
+    {5, "0 "}, {6, "0T "}, {7, "0M "}, {9, "0{----} "}, {10, "00 "}, {23, "0000O "},
+  };
+  for (auto &c : dah) {
+    reset();
+    send("W:20");
+    bool early = holdPaddle(PIN_DAH, c.n);
+    std::string d = decodedText();
+    CHECK(d == c.want, "%d dahs decoded as '%s', want '%s'", c.n, d.c_str(), c.want);
+    CHECK(early == (c.n > 5), "%d dahs: streamed=%d", c.n, (int)early);
+  }
+  // first 0 goes out as the 6th dah starts, not when the paddle is released
+  reset();
+  send("W:20");
+  sim.pinIn[PIN_DAH] = LOW;
+  for (int i = 0; i < 6; i++) {
+    until([] { return sounding(); }, 1000);
+    if (i < 5) until([] { return !sounding(); }, 1000);
+  }
+  CHECK(decodedText() == "0", "6th dah: '%s'", decodedText().c_str());
+  sim.pinIn[PIN_DAH] = HIGH;
+  step(20 * ditMs);
+  // a held dit paddle: full 10-element patterns go out as they fill; nothing lost
+  reset();
+  send("W:20");
+  holdPaddle(PIN_DIT, 25);
+  std::string d = decodedText();
+  CHECK(d == "{..........}{..........}5 ", "25 dits: '%s'", d.c_str());
+  // ordinary characters are unchanged, including 0 and 8-dit HH
+  reset();
+  send("W:20");
+  paddleSend("0 50");
+  step(10 * ditMs);
+  d = decodedText();
+  CHECK(d == "0 50 ", "normal 0s: '%s'", d.c_str());
+}
+
 static void test_ptt_button() {
   std::printf("ptt button\n");
   reset();
@@ -457,7 +513,7 @@ static void test_status() {
   std::printf("status/version\n");
   reset();
   send("?");
-  CHECK(Serial.out.find("S:v=0.4.0") != std::string::npos, "status: %s", Serial.out.c_str());
+  CHECK(Serial.out.find("S:v=0.4.1") != std::string::npos, "status: %s", Serial.out.c_str());
   send("V");
   CHECK(Serial.out.find("V:remkey") != std::string::npos, "version missing");
 }
@@ -475,6 +531,7 @@ int main() {
 #endif
   test_paddle_aborts_text();
   test_ptt_button();
+  test_long_runs_stream();
   test_client_paddle_does_not_key_rig();
   test_leds();
   test_ptt_release();

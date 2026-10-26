@@ -5,6 +5,16 @@ firmware and the remtlm telemetry firmware each carry their own version.
 
 ## 2026-10-26
 
+### remkey firmware 0.4.1
+- Long paddle runs now stream instead of waiting for the paddle to be released.
+  A held dah paddle never leaves the 2-dit gap that ends a character, so the
+  whole run used to sit in the decoder and was cut to 10 elements. Now, when a
+  6th dah follows `-----`, the five go out as a `0` and the run continues, so
+  the far end hears `0 0 0 ...` about one group behind, then the leftover (T, M,
+  O or `{----}`) when you stop. Any other run that fills the 10-element buffer
+  goes out as a raw pattern and continues, so nothing is dropped. Client Nano
+  only; the station and host are unchanged. Simulation tests added.
+
 ### remkey firmware 0.4.0
 - Fix: the station watchdog could fire spuriously right after a heartbeat. The
   heartbeat stamps `lastRxMs` with `millis()`, which can be a tick later than the

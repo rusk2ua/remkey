@@ -44,6 +44,8 @@ The radio transmits each character roughly one character-time after you send it.
 
 Anything the decoder doesn't recognise, such as SK or a fumbled character, is passed through as a raw element pattern like `{...-.-}`. The station sends it element-for-element, so nothing is lost or "corrected."
 
+**Long dash strings (antenna peaking).** Hold the dah paddle and the far end hears zeros: once a 6th dah follows five, the client sends those five as `0` and keeps going, so the station starts sending about one group (~1.3 s at 18 WPM) after you start, rather than after you stop. When you let go, the leftover dashes go out as an ordinary character (T, M, O).
+
 ## Contents
 
 ```
