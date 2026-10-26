@@ -287,3 +287,80 @@ async def test_client_shows_release_and_quit_waits_for_it(station):
     assert "waiting for the station to finish sending" in out.text
     assert "O" not in slink.sent[3:]                         # no immediate drop happened
     assert not svc.ptt
+
+
+def _latching_client(svc, ptt_switch="latching"):
+    ccfg = ClientConfig(secret=SECRET, station_host="127.0.0.1", station_port=svc.port,
+                        reconnect_s=0.1, heartbeat_s=0.1, ptt_switch=ptt_switch)
+    clink = FakeLink()
+    out = NullOut()
+    return ClientApp(ccfg, clink, Console(out)), clink, out
+
+
+async def test_latching_switch_follows_and_rearms_after_safety_drop(station):
+    svc, slink = station
+    app, clink, out = _latching_client(svc)
+    task = asyncio.create_task(app.run())
+    await wait_for(lambda: app.connected)
+
+    clink.inject("B:P")                                   # switch ON
+    await wait_for(lambda: app.station_ptt)
+    clink.inject("B:R")                                   # switch off -> graceful release
+    await wait_for(lambda: app.releasing)
+    await wait_for(lambda: not app.station_ptt)
+
+    clink.inject("B:P")                                   # ON again
+    await wait_for(lambda: app.station_ptt and not app.releasing)
+    slink.inject("!:WDOG")                                # safety stop at the station
+    await wait_for(lambda: not app.station_ptt)
+    assert "PTT switch is still ON" in out.text
+    n = len([s for s in slink.sent if s.startswith("P:")])
+    clink.inject("B:R")                                   # switch off: nothing to do
+    await asyncio.sleep(0.2)
+    assert len([s for s in slink.sent if s.startswith("P:")]) == n
+    clink.inject("B:P")                                   # switch on: transmits again
+    await wait_for(lambda: app.station_ptt)
+
+    clink.inject("B:R")
+    await wait_for(lambda: not app.station_ptt)
+    app.on_key("\x11")
+    await asyncio.wait_for(task, 3)
+
+
+async def test_latching_switch_on_at_boot_does_not_key(station):
+    svc, slink = station
+    app, clink, out = _latching_client(svc)
+    task = asyncio.create_task(app.run())
+    await wait_for(lambda: app.connected)
+    clink.inject("B:H")
+    await asyncio.sleep(0.3)
+    assert not app.station_ptt and "P:1" not in slink.sent
+    assert "PTT switch is ON at startup" in out.text
+    app.on_key("\x11")
+    await asyncio.wait_for(task, 3)
+
+
+async def test_momentary_button_ignores_release_edge(station):
+    svc, slink = station
+    app, clink, out = _latching_client(svc, ptt_switch="momentary")
+    task = asyncio.create_task(app.run())
+    await wait_for(lambda: app.connected)
+    clink.inject("B:P")
+    clink.inject("B:R")
+    await wait_for(lambda: app.station_ptt)
+    await asyncio.sleep(0.5)                              # past the 300 ms hang
+    assert app.station_ptt and not app.releasing
+    clink.inject("B:P")                                   # second press toggles off
+    await wait_for(lambda: not app.station_ptt)
+    app.on_key("\x11")
+    await asyncio.wait_for(task, 3)
+
+
+def test_ptt_switch_config_validated(tmp_path):
+    from remkey.config import load_client
+    p = tmp_path / "c.toml"
+    p.write_text(f'secret = "{SECRET}"\nptt_switch = "toggle"\n')
+    with pytest.raises(ValueError, match="ptt_switch"):
+        load_client(p)
+    p.write_text(f'secret = "{SECRET}"\nptt_switch = "latching"\n')
+    assert load_client(p).ptt_switch == "latching"

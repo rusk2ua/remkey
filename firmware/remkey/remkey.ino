@@ -17,7 +17,9 @@
 //   host -> keyer                     keyer -> host
 //   T:<text>   queue text to send     K:<c>    paddle character ("K: " = word space,
 //   W:<wpm>    set speed                       "K:{.-..-}" = unrecognised pattern)
-//   F:<hz>     sidetone frequency     B:P      PTT button pressed
+//   F:<hz>     sidetone frequency     B:P      PTT input closed (button press / switch on)
+//                                    B:R      PTT input opened (button release / switch off)
+//                                    B:H      PTT input already closed at power-up
 //   M:<0|1>    sidetone on/off        W:<wpm>  speed pot changed
 //   P:1        PTT on                 D        text queue drained / tune ended
 //   P:0        PTT off after queued   P:<0|1>  PTT output actually changed
@@ -38,7 +40,7 @@
 #include "config.h"
 #include "keyer_types.h"
 
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.4.0"
 
 // ---------------------------------------------------------------------------
 // Morse table
@@ -382,13 +384,13 @@ static void serviceButton(uint32_t now) {
   }
   if (now - btnChange > 25 && r != btnStable) {
     btnStable = r;
-    if (r == LOW) {
-      // A character just finished on the paddle but not yet reported (the decoder
-      // waits for 2 dits of silence): report it now so it reaches the station
-      // ahead of the PTT change.
-      if (pState == P_IDLE && dLen > 0) emitDecoded();
-      Serial.println(F("B:P"));
-    }
+    // A character just finished on the paddle but not yet reported (the decoder
+    // waits for 2 dits of silence): report it now so it reaches the station
+    // ahead of the PTT change.
+    if (pState == P_IDLE && dLen > 0) emitDecoded();
+    // B:P on close, B:R on open. The host decides what they mean: a momentary
+    // button toggles PTT on B:P; a latching switch follows B:P / B:R.
+    Serial.println(r == LOW ? F("B:P") : F("B:R"));
   }
 }
 
@@ -537,7 +539,10 @@ static void serviceRelease(uint32_t now) {
 static void serviceWatchdog(uint32_t now) {
   if (!wdogEnabled) return;
   if (!(pttOn || tState != T_IDLE || qLen > 0)) return;
-  if (now - lastRxMs > WDOG_MS) {
+  // Signed difference: lastRxMs is stamped with millis() inside serviceSerial(),
+  // which can be a tick later than this loop pass's `now`. Unsigned, that wraps
+  // to ~4.29e9 and fires the watchdog right after a heartbeat arrives.
+  if ((int32_t)(now - lastRxMs) > (int32_t)WDOG_MS) {
     abortText();
     setPtt(false);
     Serial.println(F("!:WDOG"));
@@ -564,6 +569,10 @@ void setup() {
   setWpm(DEFAULT_WPM);
   lastRxMs = millis();
   printVersion();
+  // Start from the input's real state so a switch left ON (or a button held) at
+  // power-up doesn't look like a fresh press. Report it instead: B:H.
+  btnLast = btnStable = digitalRead(PIN_PTT_BTN);
+  if (btnStable == LOW) Serial.println(F("B:H"));
 }
 
 void loop() {

@@ -55,6 +55,7 @@ class ClientConfig:
     echo_typed: bool = True           # play keyboard-typed text on the local sidetone
     reconnect_s: float = 3.0
     heartbeat_s: float = 1.0
+    ptt_switch: str = "momentary"     # "momentary" button (press toggles) or "latching" switch
 
 
 def _load(cls, path: str | Path):
@@ -75,4 +76,8 @@ def load_station(path: str | Path) -> StationConfig:
 
 
 def load_client(path: str | Path) -> ClientConfig:
-    return _load(ClientConfig, path)
+    cfg = _load(ClientConfig, path)
+    if cfg.ptt_switch not in ("momentary", "latching"):
+        raise ValueError(f"{path}: ptt_switch must be \"momentary\" or \"latching\", "
+                         f"not {cfg.ptt_switch!r}")
+    return cfg

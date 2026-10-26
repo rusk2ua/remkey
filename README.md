@@ -78,7 +78,7 @@ CONTRIBUTING.md, SECURITY.md   how to run the checks; security model and reporti
 | 2 | PC817 (or 4N25/4N35) optocoupler | Station only: one for KEY, one for PTT |
 | 2 | 470 Ω resistor | Opto LED current, about 8 mA |
 | 1 | 3.5 mm stereo jack | Client paddle input |
-| 1 | Momentary pushbutton or footswitch | Client PTT |
+| 1 | Momentary pushbutton/footswitch, or an SPST toggle switch | Client PTT (set `ptt_switch` in `client.toml`) |
 | 1 | Piezo sounder or small speaker + 100 µF cap | Client sidetone; or feed a headphone amp |
 | 1 | 220 Ω resistor | Sidetone series resistor |
 | 1 | 10 kΩ pot (optional) | Client speed knob. Set `USE_SPEED_POT 1`. |
@@ -241,6 +241,7 @@ This requires an AnyDesk plan that includes TCP tunneling.
 | Key | Action |
 |---|---|
 | PTT button on the keyer, or **Ctrl-T** | Toggle station PTT (the D12 PTT LED lights when the station confirms). Turning PTT off is a graceful release (see below). Pressing it again during the release keeps PTT on. |
+| PTT toggle switch (`ptt_switch = "latching"`) | ON turns station PTT on, OFF is the graceful release. After a safety stop with the switch still ON, turn it off and on again to transmit; a switch left ON when the client starts doesn't key. Ctrl-T still toggles. |
 | **Esc** | Abort queued text and any tune carrier. During a release, also drops PTT immediately. |
 | **Ctrl-U** | Tune carrier (`tune_ms`, capped by the station). Needs PTT on. |
 | **Ctrl-F / Ctrl-S** | Speed +1 / −1 WPM, both ends |

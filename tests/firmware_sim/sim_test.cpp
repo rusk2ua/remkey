@@ -239,6 +239,13 @@ static void test_watchdog() {
   // heartbeats keep it up
   for (int i = 0; i < 5; i++) { step(1000); send("H"); }
   CHECK(sim.pinOut[PIN_PTT_OUT] == HIGH, "PTT dropped with heartbeats");
+  // Regression: a heartbeat handled a tick after the loop sampled millis()
+  // leaves lastRxMs one ms ahead of `now`; that must not fire the watchdog.
+  lastRxMs = sim.now + 1;
+  serviceWatchdog(sim.now);
+  CHECK(sim.pinOut[PIN_PTT_OUT] == HIGH && Serial.out.find("!:WDOG") == std::string::npos,
+        "watchdog fired on a fresh heartbeat (unsigned wrap)");
+  send("H");
   step(3100);
   CHECK(sim.pinOut[PIN_PTT_OUT] == LOW, "PTT not dropped by watchdog");
   CHECK(Serial.out.find("!:WDOG") != std::string::npos, "no WDOG message");
@@ -263,6 +270,12 @@ static void test_paddle_aborts_text() {
   CHECK(qLen == 0, "queue not cleared (%d)", qLen);
 }
 
+static size_t countOf(const char *needle) {
+  size_t n = 0, pos = 0;
+  while ((pos = Serial.out.find(needle, pos)) != std::string::npos) { n++; pos += strlen(needle); }
+  return n;
+}
+
 static void test_ptt_button() {
   std::printf("ptt button\n");
   reset();
@@ -277,6 +290,22 @@ static void test_ptt_button() {
   size_t n = 0, pos = 0;
   while ((pos = Serial.out.find("B:P", pos)) != std::string::npos) { n++; pos += 3; }
   CHECK(n == 1, "B:P count %zu", n);
+  CHECK(countOf("B:R") == 1, "B:R count %d: %s", (int)countOf("B:R"), Serial.out.c_str());
+  CHECK(Serial.out.find("B:P") < Serial.out.find("B:R"), "B:R before B:P");
+
+  // latching switch left ON at power-up: report B:H, never a fresh B:P
+  sim = SimState();
+  sim.pinIn[PIN_PTT_BTN] = LOW;
+  Serial.out.clear();
+  setup();
+  step(100);
+  CHECK(Serial.out.find("B:H") != std::string::npos, "no B:H at boot: %s", Serial.out.c_str());
+  CHECK(countOf("B:P") == 0, "switch on at boot reported as a press");
+  sim.pinIn[PIN_PTT_BTN] = HIGH;           // switch off, then on again
+  step(60);
+  sim.pinIn[PIN_PTT_BTN] = LOW;
+  step(60);
+  CHECK(countOf("B:R") == 1 && countOf("B:P") == 1, "cycle after boot: %s", Serial.out.c_str());
 }
 
 static void test_client_paddle_does_not_key_rig() {
@@ -289,11 +318,6 @@ static void test_client_paddle_does_not_key_rig() {
 #endif
 }
 
-static size_t countOf(const char *needle) {
-  size_t n = 0, pos = 0;
-  while ((pos = Serial.out.find(needle, pos)) != std::string::npos) { n++; pos += strlen(needle); }
-  return n;
-}
 
 // P:0 is a graceful release: queued CW finishes, then PTT is held 2 s more.
 static void test_ptt_release() {
@@ -433,7 +457,7 @@ static void test_status() {
   std::printf("status/version\n");
   reset();
   send("?");
-  CHECK(Serial.out.find("S:v=0.3.0") != std::string::npos, "status: %s", Serial.out.c_str());
+  CHECK(Serial.out.find("S:v=0.4.0") != std::string::npos, "status: %s", Serial.out.c_str());
   send("V");
   CHECK(Serial.out.find("V:remkey") != std::string::npos, "version missing");
 }

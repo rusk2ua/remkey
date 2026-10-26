@@ -20,5 +20,13 @@ tune_ms = 5000
 # Play text you type on the local sidetone too
 echo_typed = true
 
+# PTT input on the travel keyer (D4 to GND):
+#   "momentary" - pushbutton/footswitch: each press toggles PTT
+#   "latching"  - SPST toggle switch: ON = PTT on, OFF = graceful release.
+#                 If the station drops PTT for safety (link loss, watchdog) with the
+#                 switch still ON, turn it off and on again to transmit. A switch
+#                 left ON when the client starts does not key the transmitter.
+ptt_switch = "momentary"
+
 reconnect_s = 3.0
 heartbeat_s = 1.0

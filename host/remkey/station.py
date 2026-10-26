@@ -482,12 +482,37 @@ async def _amain(cfg: StationConfig, dry_run: bool) -> None:
             tlm_link.close()
 
 
+def _disable_quickedit() -> None:
+    """Windows: turn off QuickEdit for this console window.
+
+    With QuickEdit on, a stray click in the window starts a text selection, and
+    Windows then blocks the process on its next console write: the service stops
+    answering clients and stops sending keyer heartbeats until the selection is
+    cleared. Harmless no-op when stdin isn't a console (or not Windows).
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        k32 = ctypes.windll.kernel32
+        h = k32.GetStdHandle(-10)                     # STD_INPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if not k32.GetConsoleMode(h, ctypes.byref(mode)):
+            return
+        ENABLE_QUICK_EDIT_MODE, ENABLE_EXTENDED_FLAGS = 0x0040, 0x0080
+        k32.SetConsoleMode(h, (mode.value & ~ENABLE_QUICK_EDIT_MODE) | ENABLE_EXTENDED_FLAGS)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="remkey station service")
     ap.add_argument("--config", default="station.toml")
     ap.add_argument("--dry-run", action="store_true", help="no Nano; log keyer commands only")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
+    _disable_quickedit()
 
     cfg = load_station(args.config)
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]

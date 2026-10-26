@@ -3,6 +3,28 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-10-26
+
+### remkey firmware 0.4.0
+- Fix: the station watchdog could fire spuriously right after a heartbeat. The
+  heartbeat stamps `lastRxMs` with `millis()`, which can be a tick later than the
+  loop's `now`; the unsigned `now - lastRxMs` then wrapped to ~4.29e9 and dropped
+  PTT with `!:WDOG`. More serial traffic (CW text) made it much more likely. The
+  comparison is now signed. Simulation regression test added.
+- PTT input reports both edges: `B:P` when it closes, `B:R` when it opens, and
+  `B:H` at power-up if it is already closed (instead of a phantom press).
+
+### Host package 0.5.0
+- Client: `ptt_switch = "latching"` in `client.toml` for an SPST toggle switch.
+  Station PTT follows the switch; switch off is the graceful release. After a
+  safety stop with the switch still ON, the client says so and waits for the
+  switch to be cycled; a switch left ON at startup never keys. Default stays
+  `"momentary"` (press toggles).
+- Station: turns off Windows console QuickEdit at startup, so a stray click in
+  the service window can no longer freeze it (and trip the Nano watchdog).
+- Client: a connection timeout now prints `TimeoutError` instead of a blank
+  `station link:` message.
+
 ## 2026-10-25
 
 ### remkey firmware 0.3.0

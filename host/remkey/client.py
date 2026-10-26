@@ -73,6 +73,7 @@ class ClientApp:
         self.quit = asyncio.Event()
         self.force_quit = asyncio.Event()
         self.releasing = False               # station finishing CW before dropping PTT
+        self.ptt_switch_on = False           # latching PTT switch position (B:P / B:R / B:H)
         self.quit_wait_s = 15.0              # longest a quit waits for that
         self._writer: asyncio.StreamWriter | None = None
         self._typed = ""     # buffer for <PROSIGN> typing
@@ -110,6 +111,16 @@ class ClientApp:
             self.console.event("PTT ignored: no station link")
             return
         self.console.event(f"PTT -> {'ON' if want else 'off'} (requested)")
+
+    def set_ptt(self, want: bool) -> None:
+        """Latching switch: make station PTT follow the switch (no-op if it already does)."""
+        if want == (self.station_ptt and not self.releasing):
+            return
+        if not self._send({"t": "ptt", "on": want}):
+            self.console.event("PTT ignored: no station link")
+            return
+        state = "ON" if want else "off"
+        self.console.event(f"PTT switch {state} -> PTT {state} (requested)")
 
     def set_wpm(self, v: int, tell_keyer: bool = True) -> None:
         self.wpm = max(5, min(50, v))
@@ -210,7 +221,20 @@ class ClientApp:
             else:
                 self.console.event(f"paddle {ch!r} dropped: no station link")
         elif line == "B:P":
-            self.toggle_ptt()
+            if self.cfg.ptt_switch == "latching":
+                self.ptt_switch_on = True
+                self.set_ptt(True)
+            else:
+                self.toggle_ptt()
+        elif line == "B:R":
+            if self.cfg.ptt_switch == "latching":
+                self.ptt_switch_on = False
+                self.set_ptt(False)
+        elif line == "B:H":
+            if self.cfg.ptt_switch == "latching":
+                self.ptt_switch_on = True
+                self.console.event("PTT switch is ON at startup - PTT stays off."
+                                   " Turn the switch off, then on, to transmit.")
         elif line.startswith("W:"):
             try:
                 self.set_wpm(int(line[2:]), tell_keyer=False)
@@ -319,6 +343,8 @@ class ClientApp:
                                    " (PTT again to stay on, Esc to stop now)")
             if was != self.station_ptt:
                 self.console.event(f"STATION PTT {'ON' if self.station_ptt else 'off'}")
+                if not self.station_ptt and self.ptt_switch_on:
+                    self._switch_still_on()
                 if self.station_ptt:
                     self._tx_peak = None
                     self._tx_pwr = None
@@ -399,11 +425,18 @@ class ClientApp:
                and loop.time() < end):
             await asyncio.sleep(0.05)
 
+    def _switch_still_on(self) -> None:
+        if self.cfg.ptt_switch == "latching":
+            self.console.event("!! PTT switch is still ON but station PTT is off."
+                               " Turn the switch off, then on, to transmit again.")
+
     def _on_disconnect(self) -> None:
         self.connected = False
         self._writer = None
         if self.station_ptt:
             self.console.event("link lost - station drops PTT on its own")
+            if self.ptt_switch_on:
+                self._switch_still_on()
         self.station_ptt = False
         self.releasing = False
         self.link.send("L:0")
@@ -430,7 +463,7 @@ class ClientApp:
                         await self._release_before_quit(writer, sess)
                     sess.cancel()
             except (TimeoutError, OSError, ConnectionError, ValueError) as exc:
-                self.console.event(f"station link: {exc or type(exc).__name__}")
+                self.console.event(f"station link: {str(exc) or type(exc).__name__}")
             finally:
                 if writer is not None:
                     writer.close()
