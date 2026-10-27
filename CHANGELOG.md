@@ -7,10 +7,12 @@ firmware and the remtlm telemetry firmware each carry their own version.
 
 ### Docs
 - New `docs/remote-access-tailscale-nordvpn.md`: reach the station over Tailscale
-  while NordVPN stays on the shack PC (split tunneling, kill switch, Meshnet,
-  firewall rule limited to the tailnet), with Mac/iPad notes and a pre-trip test
-  list. README section 5 now recommends Tailscale; SECURITY.md and the build plan
-  point to it.
+  while NordVPN stays on the shack PC. Tested on the real station: NordVPN's
+  firewall blocks inbound TCP on the Tailscale adapter, so the station listens on
+  127.0.0.1 and `tailscale serve` publishes it to the tailnet. Also covers NordVPN
+  settings (kill switch, Meshnet, why not to split-tunnel `tailscaled`), Mac/iPad
+  limits, other station software, and a pre-trip test list. README section 5 now
+  recommends Tailscale; `station.example.toml` defaults to `127.0.0.1`.
 
 ## 2026-10-26
 

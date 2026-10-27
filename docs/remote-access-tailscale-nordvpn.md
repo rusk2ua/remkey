@@ -167,29 +167,43 @@ reboot test in section 9 before relying on it.
 
 ## 4. remkey over Tailscale
 
+**Why Tailscale Serve:** with NordVPN connected, NordVPN's firewall on the shack
+PC drops *inbound* TCP connections arriving on the Tailscale adapter (ping still
+works, but a connection to a program listening on the 100.x address hangs).
+Tested: a Windows Firewall rule allowing 7373 from the tailnet is not enough, and
+disconnecting NordVPN makes it work immediately. Tailscale Serve gets around this:
+the Tailscale service (`tailscaled`) accepts the connection itself, which NordVPN
+allows, and hands it to remkey over localhost.
+
 ### Shack PC
 
-1. In `station.toml`:
+1. In `station.toml`, listen on localhost only:
    ```toml
-   listen_host = "0.0.0.0"
+   listen_host = "127.0.0.1"
    listen_port = 7373
    ```
-   `0.0.0.0` (not the 100.x address) means the service starts cleanly even if it
-   comes up before Tailscale at boot. The firewall rule below is what restricts it.
-2. PowerShell **as Administrator**, allow 7373 from the tailnet only:
+   Nothing on the LAN or the internet can reach the port directly; only Serve can.
+2. Restart the station service (or the Task Scheduler task).
+3. PowerShell **as Administrator**:
    ```powershell
-   New-NetFirewallRule -DisplayName "remkey station (Tailscale only)" `
-     -Direction Inbound -Protocol TCP -LocalPort 7373 `
-     -RemoteAddress 100.64.0.0/10,fd7a:115c:a1e0::/48 `
-     -Action Allow -Profile Any
+   tailscale serve --bg --tcp 7373 tcp://127.0.0.1:7373
+   tailscale serve status
    ```
-3. Remove the old, wider permission. Open `wf.msc` → **Inbound Rules**, sort by
-   **Program**, and **disable** any *Allow* rules for `python.exe` / `py.exe` that
-   Windows created when the station first ran (they allow every address).
-   Disabling (not deleting) makes it easy to undo.
-4. If you set up the **router port-forward** for 7373 (README Option A), **delete
-   it** on the Spectrum router. Nothing needs it now.
-5. Restart the station service (or the Task Scheduler task).
+   If it prints a link to enable Serve for your tailnet, open it, approve, and run
+   the command again. `--bg` makes it permanent (it survives reboots). The status
+   should show `tcp://100.x.y.z:7373 (tailnet only)` → `tcp://127.0.0.1:7373`.
+4. Check who's listening:
+   ```powershell
+   Get-NetTCPConnection -LocalPort 7373 -State Listen |
+     Select-Object LocalAddress, @{n='Process';e={(Get-Process -Id $_.OwningProcess).ProcessName}}
+   ```
+   Expect `127.0.0.1` → `python` and `100.x.y.z` → `tailscaled`.
+5. No Windows Firewall rule is needed for 7373. If Windows created *Allow* rules for
+   `python.exe` / `py.exe` when the station first ran, you can disable them
+   (`wf.msc` → Inbound Rules, sort by Program).
+6. If you set up a **router port-forward** for 7373 (README Option A), delete it.
+
+To turn it off: `tailscale serve --tcp=7373 off`.
 
 ### Mac
 
@@ -198,8 +212,8 @@ In `client.toml`:
 station_host = "100.x.y.z"   # the shack PC's Tailscale address from section 2
 station_port = 7373
 ```
-(The MagicDNS name, e.g. `shack`, also works when NordVPN is off on the Mac, but
-the address has no DNS dependence at all.)
+(The MagicDNS name also works when NordVPN is off on the Mac, but the address has
+no DNS dependence at all.)
 
 Bonus: the remkey link is now encrypted end to end by Tailscale (WireGuard), which
 closes the "traffic isn't encrypted" note in `SECURITY.md`.
@@ -219,12 +233,12 @@ AnyDesk stays the primary way to see and drive the shack PC:
   audio devices; FlexRadio DAX and WSJT-X users report the radio's sound devices
   disappearing over RDP.
 
-Nothing in AnyDesk has to change. Optional, once everything else works: in AnyDesk
-on the shack PC, **Settings → Connection → Allow direct connections** (TCP 7070),
-then from the Mac enter the shack PC's **Tailscale address** in AnyDesk's address
-field instead of its AnyDesk ID. That sends the session privately over the tailnet
-instead of via AnyDesk's relays. If AnyDesk won't connect that way, go back to the
-ID; nothing else depends on it.
+Nothing in AnyDesk has to change; connect by AnyDesk ID as usual (tested working
+alongside remkey over Tailscale). Connecting AnyDesk to the shack PC's Tailscale
+address instead would hit the same NordVPN inbound block as remkey (section 4),
+so don't bother unless you also route it through Serve
+(`tailscale serve --bg --tcp 7070 tcp://127.0.0.1:7070` with AnyDesk's direct
+connections enabled; untested).
 
 ---
 
@@ -236,11 +250,17 @@ problem), Tailscale still gives you a way in:
 - **Needs Windows 10 Pro.** Check with **Settings → System → About → Edition**.
   Windows 10 Home can't accept Remote Desktop connections.
 - On the shack PC: **Settings → System → Remote Desktop → On**, and add your Windows
-  user if asked. Restrict it to the tailnet like remkey:
+  user if asked. Restrict the built-in firewall rules to the tailnet:
   ```powershell
   Get-NetFirewallRule -DisplayGroup "Remote Desktop" |
     Set-NetFirewallRule -RemoteAddress 100.64.0.0/10,fd7a:115c:a1e0::/48
   ```
+- With NordVPN connected, inbound RDP over Tailscale is blocked the same way remkey
+  was (section 4). Either route it through Serve on a separate port
+  (`tailscale serve --bg --tcp 13389 tcp://127.0.0.1:3389`, then connect to
+  `100.x.y.z:13389`; untested), or disconnect NordVPN first (which needs AnyDesk,
+  the thing that's broken in this scenario). Test this at home before relying on
+  it.
 - On the Mac or iPad: Microsoft's **Windows App** (formerly Remote Desktop) →
   add PC → the shack PC's 100.x address.
 - Expect: the shack PC's local monitors lock, the window layout gets rearranged,
@@ -289,8 +309,7 @@ worked with NordVPN keep working:
   updates) are unchanged: still through NordVPN.
 - **LAN and localhost** (N1MM+ to GH Everyware on 127.0.0.1, multi-computer N1MM+
   on the home LAN, the rotator controller) are unchanged.
-- **Windows Firewall:** the only changes are the new Tailscale-only rule for 7373
-  and the disabled `python.exe` allow rules. If some *other* Python program on
+- **Windows Firewall:** the only change is the disabled `python.exe` allow rules. If some *other* Python program on
   this PC accepts inbound connections from the LAN, give it its own rule.
 
 What to check once, after a reboot:
@@ -331,7 +350,8 @@ you're testing the real path.
       NordVPN disconnected it went direct at roughly 80–110 ms. So NordVPN does
       force the relay, but on cellular the difference is a few tens of ms,
       which doesn't matter for remkey.
-- [ ] Mac: `nc -vz 100.x.y.z 7373` → `succeeded`.
+- [ ] Mac: `nc -vz -w 5 100.x.y.z 7373` → `succeeded`, **with NordVPN connected
+      on the shack PC**. A hang (timeout) means Serve isn't set up (section 4).
 - [ ] Mac: `remkey.client` connects; the station log shows the login. Key with
       `--dry-run` on the station first.
 - [ ] AnyDesk session works as before, both displays and audio.
@@ -349,7 +369,8 @@ you're testing the real path.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Mac: Tailscale "Connected", but nothing on the tailnet answers | NordVPN connected on the Mac | Disconnect NordVPN on the Mac (section 7). |
-| `tailscale ping` works, `nc` to 7373 times out | Windows Firewall, or station service not running | Check the rule from section 4 exists and is enabled; check the station console/log. |
+| `tailscale ping` works, `nc` to 7373 hangs/times out | NordVPN blocking inbound on the Tailscale adapter | Use Tailscale Serve (section 4); check `tailscale serve status`. |
+| `nc` to 7373 is refused right away | Station service not running, or not on 127.0.0.1 | Check the station console/log and `Get-NetTCPConnection -LocalPort 7373`. |
 | `tailscale ping` goes via DERP every time | NAT traversal through the NordVPN server failing | Works, just slower. If it matters, try Plan B (section 3). |
 | Shack PC: `tailscale status` says logged out, "fetch control key … unreachable network" | `tailscaled.exe` excluded in NordVPN split tunneling | Remove it from the list, `Restart-Service Tailscale`. |
 | Shack PC drops off the tailnet entirely | Key expiry, or Tailscale not running unattended | Section 2 steps 2 and 4. |

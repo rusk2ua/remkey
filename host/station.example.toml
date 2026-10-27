@@ -3,11 +3,11 @@
 # Shared secret: same string in client.toml. Generate with:  python -m remkey.genkey
 secret = "CHANGE-ME-run-python-m-remkey-genkey"
 
-# 0.0.0.0 = reachable over Tailscale (recommended; limit it with a firewall rule
-#           for 100.64.0.0/10, see docs/remote-access-tailscale-nordvpn.md) or a
-#           router port-forward.
-# 127.0.0.1 = only reachable through an AnyDesk TCP tunnel (nothing exposed on the router).
-listen_host = "0.0.0.0"
+# 127.0.0.1 = reachable only through a local forwarder: Tailscale Serve
+#             (recommended; see docs/remote-access-tailscale-nordvpn.md) or an
+#             AnyDesk TCP tunnel. Nothing exposed on the LAN or router.
+# 0.0.0.0   = reachable on every adapter (router port-forward).
+listen_host = "127.0.0.1"
 listen_port = 7373
 
 # The station Nano's COM port (Device Manager -> Ports). Not the SO2R+, not the 7610.

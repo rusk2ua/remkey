@@ -206,7 +206,7 @@ The client makes one outbound TCP connection. Pick one option; all work with the
 
 ### Recommended: Tailscale
 
-Encrypted, nothing exposed on the router, and it works with a VPN such as NordVPN running on the shack PC. Set `listen_host = "0.0.0.0"`, allow TCP 7373 from `100.64.0.0/10` only, and point `station_host` at the shack PC's Tailscale address. Full setup, including NordVPN coexistence: [docs/remote-access-tailscale-nordvpn.md](docs/remote-access-tailscale-nordvpn.md).
+Encrypted, nothing exposed on the router, and it works with a VPN such as NordVPN running on the shack PC. Set `listen_host = "127.0.0.1"`, publish the port to your tailnet with `tailscale serve --bg --tcp 7373 tcp://127.0.0.1:7373`, and point `station_host` at the shack PC's Tailscale address. Full setup, including NordVPN coexistence: [docs/remote-access-tailscale-nordvpn.md](docs/remote-access-tailscale-nordvpn.md).
 
 ### Option A: router port-forward (free)
 
