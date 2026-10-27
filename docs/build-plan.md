@@ -37,7 +37,7 @@ Prove the software path and audio before soldering anything.
 - [x] Install the client on a Mac; run it with `--dry-run`
 - [x] Connect them over the house LAN; the station log shows typed CW and PTT commands
 - [x] Set up Tailscale with NordVPN on the shack PC ([remote-access-tailscale-nordvpn.md](remote-access-tailscale-nordvpn.md))
-- [ ] Connect from the phone hotspot (Tailscale; or router port-forward / AnyDesk tunnel)
+- [x] Connect from the phone hotspot (Tailscale; or router port-forward / AnyDesk tunnel)
 - [x] Set up AnyDesk audio from the 7610's USB codec (see README, Audio)
 - [ ] Set up DVI capture of the 7610's screen (capture card and OBS installed; DVI-to-HDMI cable on order)
 - [ ] **Sidetone test:** BK-IN off, key locally, confirm the radio's sidetone is in the USB audio stream
