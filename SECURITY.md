@@ -13,7 +13,8 @@ like any remote-control service.
 **What it does not do**
 - Traffic is not encrypted. CW text isn't secret, but someone on the network path
   could in principle interfere with an authenticated session. If that matters to
-  you, use the AnyDesk tunnel option (nothing exposed on the router) or a VPN.
+  you, use Tailscale (encrypted; see docs/remote-access-tailscale-nordvpn.md),
+  the AnyDesk tunnel option (nothing exposed on the router) or another VPN.
 
 **Keep it safe**
 - Generate the secret with `python -m remkey.genkey`; never commit `station.toml`

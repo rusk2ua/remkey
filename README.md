@@ -202,7 +202,11 @@ The service logs to the console and `remkey-station.log`. It accepts one client 
 
 ## 5. Getting from the road to the shack
 
-The client makes one outbound TCP connection. Pick either option; both work with the same software.
+The client makes one outbound TCP connection. Pick one option; all work with the same software.
+
+### Recommended: Tailscale
+
+Encrypted, nothing exposed on the router, and it works with a VPN such as NordVPN running on the shack PC. Set `listen_host = "0.0.0.0"`, allow TCP 7373 from `100.64.0.0/10` only, and point `station_host` at the shack PC's Tailscale address. Full setup, including NordVPN coexistence: [docs/remote-access-tailscale-nordvpn.md](docs/remote-access-tailscale-nordvpn.md).
 
 ### Option A: router port-forward (free)
 

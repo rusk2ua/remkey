@@ -3,6 +3,15 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-10-27
+
+### Docs
+- New `docs/remote-access-tailscale-nordvpn.md`: reach the station over Tailscale
+  while NordVPN stays on the shack PC (split tunneling, kill switch, Meshnet,
+  firewall rule limited to the tailnet), with Mac/iPad notes and a pre-trip test
+  list. README section 5 now recommends Tailscale; SECURITY.md and the build plan
+  point to it.
+
 ## 2026-10-26
 
 ### remkey firmware 0.4.1
