@@ -15,7 +15,7 @@ Tick the boxes as you go (edit this file on GitHub, or locally and push).
 
 The E220 modules usually ship from China and are the slowest item, so order early.
 
-- [ ] 2× Ebyte E220-900T22D (the **900** version)
+- [x] 2× Ebyte E220-900T22D (the **900** version): arrived
 - [ ] 2× 915 MHz SMA antennas
 - [ ] 2× PC817 optocouplers
 - [ ] 2× DS18B20 waterproof probes
