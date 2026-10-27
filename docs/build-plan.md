@@ -110,7 +110,7 @@ the paddle at the radio, and N1MM+ is unaffected.
 - [ ] Wire both E220s and Nanos; flash TOWER and BASE
 - [ ] Both print `C:ok ch=77 freq_khz=927125`
 - [ ] Packets arrive at the base; `tlmview` shows them
-- [ ] ADALM-PLUTO: LoRa bursts at 927.125 MHz, nothing near 902–903
+- [ ] Spectrum check (ADALM-PLUTO, TinySA or a bench analyzer): LoRa bursts at 927.125 MHz, nothing near 902–903. With a real analyzer, look for spurs and broadband noise down at 902–903 too, with the E220 keyed into a dummy load or a short antenna
 - [ ] PA sense and MON inputs: a variable voltage or pot in `tlmview` tracks a meter
 - [ ] Both DS18B20s read; identified by hand-warming; `temp_names` set
 - [ ] MKU on the bench: LD reads locked/unlocked correctly (or `LOCK_MONITOR 0` if no external 10 MHz reference)
