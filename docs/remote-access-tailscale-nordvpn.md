@@ -295,8 +295,12 @@ worked with NordVPN keep working:
 
 What to check once, after a reboot:
 
-1. `route print -4` → the `0.0.0.0` (or `0.0.0.0/1` + `128.0.0.0/1`) routes still
-   point at the NordLynx adapter, and only `100.64.0.0` points at Tailscale.
+1. `route print -4` → two `0.0.0.0` default routes: the NordLynx one
+   (gateway `10.5.0.1`) with a much lower metric than the Ethernet one, so it
+   wins. The Tailscale adapter (`100.x`) should only carry one `/32` route per
+   tailnet peer plus `100.100.100.100` (MagicDNS), and no broadcast
+   (`255.255.255.255`) or multicast (`224.0.0.0`) routes, so LAN broadcasts
+   from N1MM+ never go near it.
 2. **N1MM+**: if you use multi-computer networking or UDP broadcasts, confirm it's
    still using the LAN address (192.168.x.x), not the `100.x` Tailscale address.
    Programs that pick "the first network adapter" can grab the new one.
