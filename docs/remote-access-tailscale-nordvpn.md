@@ -278,6 +278,38 @@ logging, not paddle CW.
 
 ---
 
+## 8a. Other station software (N1MM+, GH Everyware, Slack)
+
+Tailscale on the shack PC only adds routes for `100.64.0.0/10` and
+`fd7a:115c:a1e0::/48`. Default internet traffic still goes through NordVPN, and
+LAN traffic (`192.168.x.x`) still goes out the Ethernet adapter, so programs that
+worked with NordVPN keep working:
+
+- **Outbound internet clients** (Slack, cluster/telnet spots, callbook lookups,
+  updates) are unchanged: still through NordVPN.
+- **LAN and localhost** (N1MM+ to GH Everyware on 127.0.0.1, multi-computer N1MM+
+  on the home LAN, the rotator controller) are unchanged.
+- **Windows Firewall:** the only changes are the new Tailscale-only rule for 7373
+  and the disabled `python.exe` allow rules. If some *other* Python program on
+  this PC accepts inbound connections from the LAN, give it its own rule.
+
+What to check once, after a reboot:
+
+1. `route print -4` → the `0.0.0.0` (or `0.0.0.0/1` + `128.0.0.0/1`) routes still
+   point at the NordLynx adapter, and only `100.64.0.0` points at Tailscale.
+2. **N1MM+**: if you use multi-computer networking or UDP broadcasts, confirm it's
+   still using the LAN address (192.168.x.x), not the `100.x` Tailscale address.
+   Programs that pick "the first network adapter" can grab the new one.
+3. **GH Everyware** connects to the rotator and N1MM+ as before.
+
+Adding remote computers later (a second N1MM+ station, a laptop in the field):
+put them on the tailnet instead of opening ports on the router, and give N1MM+
+their `100.x` addresses explicitly. Tailscale carries unicast traffic but not LAN
+broadcasts, so anything that relies on broadcast discovery needs the address typed
+in. If a Tailscale DNS setting ever interferes with name lookups,
+`tailscale set --accept-dns=false` on the shack PC turns that part off without
+affecting anything else.
+
 ## 9. Test before you leave home
 
 Do these **at home**, with the Mac on the **phone hotspot** (not home Wi-Fi), so
