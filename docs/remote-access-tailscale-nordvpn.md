@@ -121,9 +121,12 @@ Get-NetIPAddress -AddressFamily IPv4 |
    apps**.
 2. Click **Add apps** → **Browse apps** and go to `C:\Program Files\Tailscale\`.
 3. Add **`tailscaled.exe`** (the service that carries the packets).
-4. Repeat and add **`tailscale-ipn.exe`** (the tray app). A user with this same
-   combination reports that adding it fixed reaching their tailnet; adding both
-   costs nothing.
+4. Repeat and add **`tailscale-ipn.exe`** (the tray app) and **`tailscale.exe`**
+   (the command-line tool). A user with this same combination reports that adding
+   the tray app fixed reaching their tailnet. The CLI needs to be there too,
+   because `tailscale netcheck` runs its tests from the CLI process itself: if the
+   CLI is still inside NordVPN, netcheck reports NordVPN's address even when the
+   service is correctly split.
 5. Leave AnyDesk alone. It works today; don't change two things at once.
 6. **Disconnect and reconnect NordVPN** so the rules take effect, then in
    PowerShell:
@@ -132,8 +135,16 @@ Get-NetIPAddress -AddressFamily IPv4 |
    tailscale status
    ```
    `netcheck` should show **UDP: true** and your Spectrum public IPv4, not a
-   NordVPN server address. If it shows the NordVPN address, the split tunnel isn't
-   applied; recheck the paths and reconnect again.
+   NordVPN server address. To see what the service itself is using (the thing
+   that matters), list the endpoints it has discovered:
+   ```powershell
+   (tailscale status --json | ConvertFrom-Json).Self.Addrs
+   ```
+   One of them should be your Spectrum public IP. If you only see NordVPN's
+   address (or only `10.5.0.x`), the split tunnel isn't applied; recheck the paths
+   and reconnect NordVPN. A quick sanity check on latency: from Springwater on
+   fiber, the Toronto or NYC DERP should be well under 30 ms; 40 ms and up suggests
+   the traffic is detouring through a NordVPN server.
 
 ### Plan B if the shack PC still can't be reached over Tailscale
 
