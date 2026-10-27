@@ -12,8 +12,9 @@ Short version:
 - **Tailscale** carries remkey (TCP 7373) and gives you a private backup path to the
   shack PC. It replaces the router port-forward (section 5, Option A) and the
   AnyDesk TCP tunnel (Option B).
-- **NordVPN** stays connected on the shack PC, with Tailscale excluded from it by
-  split tunneling and a few settings changed (section 3).
+- **NordVPN** stays connected on the shack PC, with a few settings changed
+  (section 3). Tailscale runs *inside* the NordVPN tunnel; do **not** exclude the
+  Tailscale service with NordVPN's split tunneling (it cuts Tailscale off).
 - **On the Macs and the iPad, Tailscale and NordVPN can't run at the same time.**
   Disconnect NordVPN before you connect to the station (section 7).
 
@@ -25,8 +26,8 @@ Short version:
  Mac (NordVPN OFF)                                   Shack PC (NordVPN ON)
  ┌──────────────────┐                                ┌──────────────────────────────┐
  │ remkey.client ───┼── Tailscale (WireGuard) ──────►│ tailscaled  ──► remkey.station│
- │                  │   100.x.y.z : TCP 7373         │  (split-tunneled: bypasses   │
- │                  │                                │   NordVPN)        port 7373  │
+ │                  │   100.x.y.z : TCP 7373         │  (rides inside the  port 7373│
+ │                  │                                │   NordVPN tunnel)            │
  │ AnyDesk ─────────┼── AnyDesk (as today) ─────────►│ AnyDesk: 2 displays + audio  │
  └──────────────────┘                                │                              │
                                                      │ browsers, updates, etc. ──►  │
@@ -34,12 +35,22 @@ Short version:
                                                      └──────────────────────────────┘
 ```
 
-Why the split tunnel matters: Tailscale only routes traffic for its own
-`100.64.0.0/10` addresses and leaves everything else to NordVPN, so the two don't
-fight over routes. The trouble is NordVPN's firewall, which tends to drop traffic it
-isn't carrying. Excluding Tailscale's programs from NordVPN lets Tailscale reach its
-peers straight over the fiber, which also gets you direct (not relayed)
-connections and the lowest latency.
+Why this works: Tailscale only routes traffic for its own `100.64.0.0/10`
+addresses and leaves everything else to NordVPN, so the two don't fight over
+routes. Tailscale's own encrypted packets simply travel through the NordVPN tunnel,
+and the outside world sees the shack PC at a NordVPN server address. NordVPN's NAT
+is the friendly kind (`tailscale netcheck` shows `MappingVariesByDestIP: false`),
+so peers can usually still connect directly, with a detour through the NordVPN
+server, instead of falling back to Tailscale's relays.
+
+**Tested and rejected: excluding `tailscaled.exe` with NordVPN split tunneling.**
+It looks like the obvious fix, but on this PC (NordVPN Windows app, Oct 2026) the
+exclusion only takes effect when the Tailscale service restarts, and from then on
+the service can't reach anything: `tailscale status` shows it logged out, unable to
+fetch the control key ("A socket operation was attempted to an unreachable
+network"). NordVPN's per-app exclusion is built for desktop apps, not a service
+running as SYSTEM. Removing `tailscaled.exe` from the list and restarting the
+service fixed it.
 
 A side effect worth knowing: with NordVPN on, the old router port-forward
 (Option A) probably never worked reliably, because replies to inbound connections
@@ -76,7 +87,8 @@ Do this while you're at home, sitting at the shack PC.
 
 Tailscale sets its adapter to the **Private** network category in Windows. If the
 tray ever shows *"Failed to set the network category to private"*, restart
-Tailscale and check that NordVPN's split tunneling (next section) is in place.
+Tailscale, and check that `tailscaled.exe` is *not* in NordVPN's split tunneling
+list (section 3).
 
 ---
 
@@ -92,7 +104,7 @@ box at the top of NordVPN's settings.
 | Auto-connect | Settings → Connection (or General) | **On**, "Always" / "On all networks" | NordVPN comes back by itself after a reboot. |
 | **Meshnet** | Varies by version | **Off** (check it with PowerShell; see below) | Meshnet uses the same `100.64.0.0/10` address block as Tailscale. Both on = address conflict. |
 | **Kill Switch** | Settings → Kill Switch | **Internet Kill Switch: Off.** App Kill Switch: optional (browsers only) | If NordVPN ever drops with the Internet Kill Switch on, it blocks *all* traffic, Tailscale and AnyDesk included, and you're locked out until someone is at the PC. |
-| **Split tunneling** | Settings → Split tunneling | **On**, mode **"Bypass VPN for selected apps"**, with the Tailscale programs below | Lets Tailscale reach its peers directly. |
+| **Split tunneling** | Settings → Split tunneling | Off, or on **without `tailscaled.exe`** in the list | Excluding the Tailscale service cuts it off entirely (section 1). |
 | Threat Protection / custom DNS | Settings → Threat Protection, Settings → Connection | Either is fine | Can stop Tailscale names (MagicDNS) resolving *on the shack PC*. Nothing here relies on that: the clients use the 100.x address. |
 | Stay invisible on LAN / Allow LAN discovery | Settings → Connection (or General) | Either is fine | Affects your home LAN, not the tailnet. |
 
@@ -115,44 +127,41 @@ Get-NetIPAddress -AddressFamily IPv4 |
   Meshnet toggle on **Devices in Meshnet** → **Disable for this device**; in
   newer versions try the search box in Settings), then run the check again.
 
-### Adding Tailscale to split tunneling
+### Checking Tailscale after NordVPN changes
 
-1. Settings → **Split tunneling** → turn it **On** → mode **Bypass VPN for selected
-   apps**.
-2. Click **Add apps** → **Browse apps** and go to `C:\Program Files\Tailscale\`.
-3. Add **`tailscaled.exe`** (the service that carries the packets).
-4. Repeat and add **`tailscale-ipn.exe`** (the tray app) and **`tailscale.exe`**
-   (the command-line tool). A user with this same combination reports that adding
-   the tray app fixed reaching their tailnet. The CLI needs to be there too,
-   because `tailscale netcheck` runs its tests from the CLI process itself: if the
-   CLI is still inside NordVPN, netcheck reports NordVPN's address even when the
-   service is correctly split.
-5. Leave AnyDesk alone. It works today; don't change two things at once.
-6. **Disconnect and reconnect NordVPN** so the rules take effect, then in
-   PowerShell:
-   ```
-   tailscale netcheck
-   tailscale status
-   ```
-   `netcheck` should show **UDP: true** and your Spectrum public IPv4, not a
-   NordVPN server address. To see what the service itself is using (the thing
-   that matters), list the endpoints it has discovered:
-   ```powershell
-   (tailscale status --json | ConvertFrom-Json).Self.Addrs
-   ```
-   One of them should be your Spectrum public IP. If you only see NordVPN's
-   address (or only `10.5.0.x`), the split tunnel isn't applied; recheck the paths
-   and reconnect NordVPN. A quick sanity check on latency: from Springwater on
-   fiber, the Toronto or NYC DERP should be well under 30 ms; 40 ms and up suggests
-   the traffic is detouring through a NordVPN server.
+After changing NordVPN settings, restart the Tailscale service (PowerShell as
+Administrator) and check that it's still connected:
 
-### Plan B if the shack PC still can't be reached over Tailscale
+```powershell
+Restart-Service Tailscale     # can look stuck for a while; it usually isn't
+Start-Sleep 15
+tailscale status
+```
 
-NordVPN's split tunneling has a second mode, **"Enable VPN for selected apps
-only"**: only the apps you list (your browsers, for example) go through NordVPN,
-and everything else (Tailscale, AnyDesk, N1MM+, Windows Update) uses the fiber
-directly. It's the most robust arrangement for a station PC. Use it if section 9's
-tests fail with the normal mode.
+You should see your devices, with the shack PC on its `100.x` address. If it says
+**logged out** and mentions the control key or an unreachable network, NordVPN is
+blocking the service: take `tailscaled.exe` out of NordVPN's split tunneling list,
+then restart the service again.
+
+To see the public addresses the service is using:
+
+```powershell
+(tailscale status --json | ConvertFrom-Json).Self.Addrs
+```
+
+With NordVPN connected you'll see a NordVPN server address, the NordLynx address
+(`10.5.0.x`) and the LAN address. That's expected. (`tailscale netcheck` runs from
+the CLI process, so it reports what the CLI sees, not necessarily the service.)
+
+### Plan B: only selected apps use NordVPN (untested here)
+
+If tailnet connections from the road turn out to be relayed (`via DERP(...)`) and
+the extra latency matters, NordVPN's split tunneling has a second mode, **"Enable
+VPN for selected apps only"**: only the apps you list (your browsers, for
+example) go through NordVPN, and everything else (Tailscale, AnyDesk, N1MM+,
+Windows Update) uses the fiber directly. That avoids per-app exclusion of the
+Tailscale service entirely. Test it with the commands above, and run the remote
+reboot test in section 9 before relying on it.
 
 ---
 
@@ -275,9 +284,9 @@ Do these **at home**, with the Mac on the **phone hotspot** (not home Wi-Fi), so
 you're testing the real path.
 
 - [ ] Shack PC: NordVPN connected, `tailscale status` shows the Mac.
-- [ ] Mac (NordVPN off): `tailscale ping 100.x.y.z` → replies, ideally ending
-      `via <Spectrum IP>:<port>` (direct). `via DERP(...)` means relayed: works,
-      but slower; recheck section 3.
+- [ ] Mac (NordVPN off): `tailscale ping 100.x.y.z` → replies. Ending
+      `via <NordVPN server IP>:<port>` is direct (with the NordVPN detour);
+      `via DERP(...)` means relayed: works, but slower (see Plan B, section 3).
 - [ ] Mac: `nc -vz 100.x.y.z 7373` → `succeeded`.
 - [ ] Mac: `remkey.client` connects; the station log shows the login. Key with
       `--dry-run` on the station first.
@@ -297,7 +306,8 @@ you're testing the real path.
 |---|---|---|
 | Mac: Tailscale "Connected", but nothing on the tailnet answers | NordVPN connected on the Mac | Disconnect NordVPN on the Mac (section 7). |
 | `tailscale ping` works, `nc` to 7373 times out | Windows Firewall, or station service not running | Check the rule from section 4 exists and is enabled; check the station console/log. |
-| `tailscale ping` goes via DERP every time | Shack PC's Tailscale traffic still inside NordVPN | Recheck split tunneling paths, reconnect NordVPN, run `tailscale netcheck`. |
+| `tailscale ping` goes via DERP every time | NAT traversal through the NordVPN server failing | Works, just slower. If it matters, try Plan B (section 3). |
+| Shack PC: `tailscale status` says logged out, "fetch control key … unreachable network" | `tailscaled.exe` excluded in NordVPN split tunneling | Remove it from the list, `Restart-Service Tailscale`. |
 | Shack PC drops off the tailnet entirely | Key expiry, or Tailscale not running unattended | Section 2 steps 2 and 4. |
 | Shack PC unreachable by anything after a NordVPN hiccup | Internet Kill Switch on | Turn it off (section 3). |
 | Tailscale shows a Meshnet/address warning, or tailnet traffic goes nowhere | NordVPN Meshnet turned on | Turn Meshnet off. |
