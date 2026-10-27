@@ -3,7 +3,7 @@
 [![CI](https://github.com/rusk2ua/remkey/actions/workflows/ci.yml/badge.svg)](https://github.com/rusk2ua/remkey/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Status:** the software is complete and tested in CI (simulation, end-to-end network tests, and firmware builds for every Nano image), but it has **not yet been run on real hardware**. Sections 7 and 9 have the first-power-up checklists. Reports from real stations are very welcome.
+> **Status:** the software is complete and tested in CI (simulation, end-to-end network tests, and firmware builds for every Nano image), and the station Nano has now keyed its PTT and CW outputs (optocoupler LEDs) from a remote Mac paddle over Tailscale (Oct 2026). It has **not yet been wired to a radio**. Sections 7 and 9 have the first-power-up checklists. Reports from real stations are very welcome.
 
 Send CW with your own paddle from anywhere, with an instant local sidetone, and have the shack re-key it with perfect timing. Remote PTT (the TRANSMIT button) included.
 
