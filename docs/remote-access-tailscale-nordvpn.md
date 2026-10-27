@@ -90,11 +90,31 @@ box at the top of NordVPN's settings.
 |---|---|---|---|
 | VPN protocol | Settings → Connection | **NordLynx** (already) | Leave as is. |
 | Auto-connect | Settings → Connection (or General) | **On**, "Always" / "On all networks" | NordVPN comes back by itself after a reboot. |
-| **Meshnet** | Left sidebar → **Meshnet** | **Off** | Meshnet uses the same `100.64.0.0/10` address block as Tailscale. Both on = address conflict. |
+| **Meshnet** | Left sidebar → **Devices in Meshnet** | **Off** (see below; there's no Off choice in the menu) | Meshnet uses the same `100.64.0.0/10` address block as Tailscale. Both on = address conflict. |
 | **Kill Switch** | Settings → Kill Switch | **Internet Kill Switch: Off.** App Kill Switch: optional (browsers only) | If NordVPN ever drops with the Internet Kill Switch on, it blocks *all* traffic, Tailscale and AnyDesk included, and you're locked out until someone is at the PC. |
 | **Split tunneling** | Settings → Split tunneling | **On**, mode **"Bypass VPN for selected apps"**, with the Tailscale programs below | Lets Tailscale reach its peers directly. |
 | Threat Protection / custom DNS | Settings → Threat Protection, Settings → Connection | Either is fine | Can stop Tailscale names (MagicDNS) resolving *on the shack PC*. Nothing here relies on that: the clients use the 100.x address. |
 | Stay invisible on LAN / Allow LAN discovery | Settings → Connection (or General) | Either is fine | Affects your home LAN, not the tailnet. |
+
+### Checking and turning off Meshnet
+
+NordVPN has no "Off" choice for Meshnet. Instead:
+
+1. Left sidebar → **Devices in Meshnet**.
+2. Look at the **Meshnet** toggle at the top:
+   - **Toggle off** (or the screen just offers to turn Meshnet on, with no
+     "This device" card): Meshnet is already off. Leave it.
+   - **Toggle on** (a "This device" card with a Nord name and IP is shown): click
+     the **dropdown arrow** next to the toggle → **Disable** (some versions say
+     **Deactivate**) → confirm **Disable for this device**.
+3. Confirm from PowerShell that only Tailscale holds a `100.x` address:
+   ```powershell
+   Get-NetIPAddress -AddressFamily IPv4 |
+     Where-Object IPAddress -like '100.*' |
+     Format-Table InterfaceAlias, IPAddress
+   ```
+   You want exactly one row, with InterfaceAlias **Tailscale**. A second `100.x`
+   row on a NordLynx adapter means Meshnet is still active.
 
 ### Adding Tailscale to split tunneling
 
