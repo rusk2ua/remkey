@@ -233,7 +233,20 @@ AnyDesk stays the primary way to see and drive the shack PC:
   audio devices; FlexRadio DAX and WSJT-X users report the radio's sound devices
   disappearing over RDP.
 
-Nothing in AnyDesk has to change; connect by AnyDesk ID as usual (tested working
+**Dropped sessions (`anynet_unknown` every few minutes):** this predates Tailscale
+here; it happens with NordVPN on the shack PC. What helps:
+
+1. On the shack PC, AnyDesk → **Settings → Connection** → unlock → **untick
+   "Allow direct connections"**. Sessions then always go through AnyDesk's relays,
+   which NordVPN doesn't interrupt.
+2. Connect with **`/np`** after the ID (e.g. `123456789/np`), which also helped
+   before.
+3. Last resort, and only while you're at the shack PC: add AnyDesk to NordVPN
+   split tunneling (bypass). Test it the same way as section 3, because excluding
+   the Tailscale *service* this way cut it off completely, and AnyDesk also runs
+   as a service.
+
+Otherwise nothing in AnyDesk has to change; connect by AnyDesk ID as usual (tested working
 alongside remkey over Tailscale). Connecting AnyDesk to the shack PC's Tailscale
 address instead would hit the same NordVPN inbound block as remkey (section 4),
 so don't bother unless you also route it through Serve
