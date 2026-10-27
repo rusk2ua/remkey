@@ -287,6 +287,14 @@ you're testing the real path.
 - [ ] Mac (NordVPN off): `tailscale ping 100.x.y.z` → replies. Ending
       `via <NordVPN server IP>:<port>` is direct (with the NordVPN detour);
       `via DERP(...)` means relayed: works, but slower (see Plan B, section 3).
+      `tailscale ping` stops as soon as it finds a direct path, whatever `-c`
+      says; add `--until-direct=false` to keep pinging.
+
+      Measured here (Oct 2026, iPhone on cellular): with NordVPN connected on
+      the shack PC, every ping went via DERP(nyc) at roughly 90–170 ms; with
+      NordVPN disconnected it went direct at roughly 80–110 ms. So NordVPN does
+      force the relay, but on cellular the difference is a few tens of ms,
+      which doesn't matter for remkey.
 - [ ] Mac: `nc -vz 100.x.y.z 7373` → `succeeded`.
 - [ ] Mac: `remkey.client` connects; the station log shows the login. Key with
       `--dry-run` on the station first.
