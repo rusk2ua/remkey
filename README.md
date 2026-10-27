@@ -277,7 +277,15 @@ The station runs about one character behind you, so pressing PTT off right after
 
 ### Audio
 
-The receive audio path is independent of remkey. The zero-setup option is AnyDesk's own audio transmission: on the shack PC, set the 7610's USB audio CODEC output to play through the default playback device (Sound → Recording → USB Audio CODEC → Properties → Listen → "Listen to this device"). Before relying on it, confirm the radio's CW sidetone is present in that stream: key the rig locally with BK-IN off and listen.
+The receive audio path is independent of remkey. AnyDesk's own audio transmission carries it one way (radio → shack PC → Mac); this setup is verified on the IC-7610:
+
+1. **Sound → Recording:** the 7610's input (e.g. *Microphone – 3- USB Audio CODEC*) → Properties → **Listen** → tick **Listen to this device**, playback through the PC's normal output.
+2. **Sound → Playback:** the default (green check) is the PC's normal output, e.g. an HDMI monitor. It doesn't need speakers; it just has to show *Ready* / *Default Device*. **Never** make *Speakers – USB Audio CODEC* the default: that's the radio's transmit input.
+3. **AnyDesk on the shack PC → Settings → Audio:** **Audio Transmission = "Audio output of this device"**, not the radio's codec. (Pointing it at the codec sends the silent transmit side, so the Mac hears nothing.)
+4. **AnyDesk → Settings → Permissions:** "Hear my device's sound" ticked in both the **Unattended Access** and **Default** profiles.
+5. **Restart AnyDesk on the shack PC and reconnect** after any audio change; a running session doesn't pick it up.
+
+Quick check: play a YouTube video on the shack PC. If you hear it on the Mac, the radio comes through the same way. If an HDMI monitor sleeps, Windows may drop its audio device, so set the display to never turn off. Before relying on it, confirm the radio's CW sidetone is present in the stream: key the rig locally with BK-IN off and listen.
 
 ### Safety layers
 
