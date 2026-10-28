@@ -107,6 +107,7 @@ the paddle at the radio, and N1MM+ is unaffected.
 
 ## Phase 5: remtlm on the bench (parallel with phases 1–4)
 
+- [ ] Optional: check each E220 with the FT232 adapter (README section 9): `python -m remkey.e220 --port ... --write` reads back channel 77, 9.6 kbps, 17 dBm
 - [ ] Wire both E220s and Nanos; flash TOWER and BASE
 - [ ] Both print `C:ok ch=77 freq_khz=927125`
 - [ ] Packets arrive at the base; `tlmview` shows them

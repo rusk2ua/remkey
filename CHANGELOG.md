@@ -3,6 +3,14 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-10-28
+
+### Host package 0.5.1
+- `python -m remkey.e220`: read and decode an E220-900T22D's settings, or store
+  remtlm's settings (`--write`), through any 3.3 V USB serial adapter such as an
+  FT232. Wiring in README section 9. (`remkey.__version__` now matches
+  `pyproject.toml`.)
+
 ## 2026-10-27
 
 ### Docs

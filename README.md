@@ -59,6 +59,7 @@ host/remkey/protocol.py        network protocol, CW text sanitiser
 host/remkey/telemetry.py       remtlm packet parsing, calibration, link statistics
 host/remkey/tlmview.py         bench viewer for calibrating the PA power sense
 host/remkey/powerstats.py      tower supply statistics from the CSV log; suggested alert limits
+host/remkey/e220.py            read or program an E220 LoRa module through a USB serial adapter
 host/*.example.toml            config templates
 host/tests/                    pytest: protocol, end-to-end over localhost, telemetry
 tests/firmware_sim/            g++ simulation of the sketch (timing, decoder, watchdog)
@@ -472,6 +473,34 @@ INA226 module: VCC ── 5V, GND ── GND, SDA ── A4, SCL ── A5   (A0
 ### Wiring: base Nano (radio room)
 
 Only the E220 block above, plus USB to the shack PC. Put the module and its antenna where it has the best view of the tower, for example a window. A USB extension cable is fine.
+
+### Optional: check each E220 with a USB serial adapter
+
+This step isn't required, because the Nano firmware programs the module at every boot. But it's a quick way to prove each module works before you wire it in, and it never transmits.
+
+Use any 3.3 V USB serial adapter, such as an FT232 board with its logic jumper set to **3.3 V**:
+
+| Adapter | E220-900T22D | Notes |
+|---|---|---|
+| GND | GND | |
+| 5V (or VCC) | VCC | Configuration draws only a few mA, so the adapter's own supply is fine |
+| TXD | RXD | Crossed: the adapter's TX goes to the module's RX |
+| RXD | TXD | |
+| 3.3V (VCCIO) | M0 **and** M1 | Both HIGH = configuration mode. Connect before powering up. |
+| — | AUX | Leave unconnected |
+
+On a Mac the adapter shows up as `/dev/cu.usbserial-XXXX` (`ls /dev/cu.usbserial-*`); no driver is needed. Then run:
+
+```
+python -m remkey.e220 --port /dev/cu.usbserial-XXXX
+python -m remkey.e220 --port /dev/cu.usbserial-XXXX --write
+```
+
+- **The first command** reads and decodes the module's current settings. A new module typically shows channel 18 (868.125 MHz), 2.4 kbps and 22 dBm.
+- **The second** stores remtlm's settings and reads them back to verify: channel 77 (927.125 MHz), 9.6 kbps air rate, 17 dBm, transparent mode, no encryption.
+- **If there's no reply,** check M0/M1, the TX/RX crossover and the 3.3 V logic jumper.
+
+Afterwards, the Nano finds its module already set and skips the write at boot: no `C:written`, just `C:ok ch=77 freq_khz=927125`.
 
 ### Build and check
 
