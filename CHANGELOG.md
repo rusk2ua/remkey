@@ -5,6 +5,14 @@ firmware and the remtlm telemetry firmware each carry their own version.
 
 ## 2026-10-28
 
+### Station launcher
+- `host/Start-remkey.bat`: starts the station service from its own folder (venv if
+  present, else `py`) for a Task Scheduler "At log on" task; keeps the window
+  open with the exit code if the service stops. README section 4 now uses it and
+  covers switching console QuickEdit off in the registry, which closes the gap
+  before remkey's own QuickEdit fix runs at logon.
+- `.venv/` added to `.gitignore`; `.bat`/`.cmd` files kept with CRLF line endings.
+
 ### Host package 0.5.1
 - `python -m remkey.e220`: read and decode an E220-900T22D's settings, or store
   remtlm's settings (`--write`), through any 3.3 V USB serial adapter such as an

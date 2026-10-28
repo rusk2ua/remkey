@@ -195,7 +195,16 @@ The serial command set is documented at the top of `remkey.ino`.
    ```
    py -m remkey.station --config station.toml
    ```
-6. To start it automatically, create a Task Scheduler task "At log on" running `py -m remkey.station --config C:\path\station.toml` with "Start in" set to the `host` folder.
+6. To start it automatically, use `host\Start-remkey.bat`. It runs the service from the `host` folder (using `host\.venv` if you made one, otherwise `py`), titles the window "remkey station", and if the service ever stops it leaves the window open with the exit code. Create a Task Scheduler task:
+   - **Name:** remkey station. **Trigger:** At log on (your user).
+   - **Action:** Start a program. **Program/script:** the full path to `Start-remkey.bat`. **Start in:** the `host` folder.
+   - **Turn off console QuickEdit** for your user, once, in a Command Prompt:
+     ```
+     reg add HKCU\Console /v QuickEdit /t REG_DWORD /d 0 /f
+     ```
+     With QuickEdit on, a click in the window while it's opening at logon can put it into "Select" mode, which freezes the service until a key is pressed. remkey also turns QuickEdit off itself, but only once Python has started. The registry setting closes that gap.
+
+   To check it, reboot, and before touching the window, connect a client and key PTT. Log lines should appear without pressing anything.
 
 The service logs to the console and `remkey-station.log`. It accepts one client at a time.
 

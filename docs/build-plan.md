@@ -170,7 +170,9 @@ MKU's replies, with near-zero packet loss on the bench.
 
 ## Phase 8: Hardening
 
-- [ ] Station service starts automatically (Task Scheduler, "At log on")
+- [ ] Station service starts automatically (Task Scheduler "At log on" → `host\Start-remkey.bat`)
+- [ ] Console QuickEdit off for the station user (`reg add HKCU\Console /v QuickEdit /t REG_DWORD /d 0 /f`)
+- [ ] Reboot test: before touching the window, a client connects and keys PTT; log lines appear without pressing Enter
 - [ ] Shack PC power plan: never sleep; USB selective suspend off
 - [ ] Two-week soak in normal use
 - [ ] Review `remkey-station.log` and `remkey-tlm.csv` for drops, watchdog events, temperature trends
