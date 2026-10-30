@@ -3,7 +3,7 @@
 [![CI](https://github.com/rusk2ua/remkey/actions/workflows/ci.yml/badge.svg)](https://github.com/rusk2ua/remkey/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Status:** the software is complete and tested in CI (simulation, end-to-end network tests, and firmware builds for every Nano image), and the station Nano has now keyed its PTT and CW outputs (optocoupler LEDs) from a remote Mac paddle over Tailscale (Oct 2026). It has **not yet been wired to a radio**. Sections 7 and 9 have the first-power-up checklists. Reports from real stations are very welcome.
+> **Status:** the software is complete and tested in CI (simulation, end-to-end network tests, and firmware builds for every Nano image), and it now runs end to end on the author's station (Oct 2026): a Mac paddle over Tailscale keys the IC-7610 and its tower-mounted 10 GHz transverter, with graceful PTT release and every safety stop checked. The tower telemetry (remtlm) has not yet run on real hardware. Sections 7 and 9 have the first-power-up checklists. Reports from real stations are very welcome.
 
 Send CW with your own paddle from anywhere, with an instant local sidetone, and have the shack re-key it with perfect timing. Remote PTT (the TRANSMIT button) included.
 
@@ -79,7 +79,7 @@ CONTRIBUTING.md, SECURITY.md   how to run the checks; security model and reporti
 |---|---|---|
 | 2 | Arduino Nano (ATmega328P) | Clones are fine. CH340 USB chips need no driver on current macOS or Windows. |
 | 2 | PC817 (or 4N25/4N35) optocoupler | Station only: one for KEY, one for PTT |
-| 2 | 470 Ω resistor | Opto LED current, about 8 mA |
+| 2 | 470 Ω resistor | Opto LED current, about 8 mA (see below if you use a ready-made opto board) |
 | 1 | 3.5 mm stereo jack | Client paddle input |
 | 1 | Momentary pushbutton/footswitch, or an SPST toggle switch | Client PTT (set `ptt_switch` in `client.toml`) |
 | 1 | Piezo sounder or small speaker + 100 µF cap | Client sidetone; or feed a headphone amp |
@@ -120,6 +120,14 @@ GND ────────┤2 cathode             emitter    3 ├── chas
 
 The optocouplers keep the Nano and PC USB ground galvanically separate from the radio, which matters on a station with a tower.
 
+**Ready-made 2-channel PC817 boards** (sold as "817 Module 2 Channel Isolation") need two changes before they'll work here. Each channel has a 3 kΩ chip resistor (marked `302`) on the input side **and another in series with the output**:
+
+- **Input 302:** in series with your own resistor it starves the LED (about 0.4 mA). Remove it and bridge the pads, then drive the LED from the Nano through about 220 Ω (the author used 470 Ω in parallel with 390 Ω): about 3 V across the board's input, LED clearly lit.
+- **Output 302:** it forms a divider with the radio-side pull-up, so the "closed" output only gets down to about 1.6 V into a footswitch input with a pull-up of a few kΩ. KEY may still work while PTT doesn't. Remove it and bridge the pads; the closed output then reads about 0.1–0.2 V.
+- The yellow jumper on each channel ties the output's emitter side to the board ground. Leave it off to keep the radio side fully isolated from the Nano.
+
+With the 302s gone nothing on the output limits current, which is fine for key and PTT inputs (a few mA through the radio's own pull-up). Don't use the outputs to switch anything powered.
+
 **KEY connection.** Both the SO2R+ and the remkey optocoupler are open-collector closures to ground, so they can safely share one line. Either:
 
 - Y-cable the opto output in parallel with the SO2R+ keying output on the rear KEY jack (simplest; N1MM+ keeps working), or
@@ -133,6 +141,8 @@ Collector goes to the key line (tip), emitter to ground (sleeve). If keying does
 - **Front MIC connector PTT pin:** always a TX input. Check the manual for the pin number.
 
 Do **not** wire the opto to the SEND output that drives your DC injector. That would key the transverter without the radio being in transmit.
+
+**With a YCCC SO2R Box (plus):** the simplest PTT input is the box's rear RCA **PTT** footswitch jack. It keys the transmit-focus radio's PTT through the box's radio cable, so your SEND-driven sequencing works unchanged. (The DB25 is the box's auxiliary connector and has no PTT or key pins.) This is what the author uses, with the KEY opto in parallel with the box's keying output; N1MM+ and a local paddle through the box keep working.
 
 ---
 
@@ -322,6 +332,8 @@ Paddle characters sent while the link is down are **dropped**, not buffered, so 
    - Paddle → KEY opto follows about one character behind; local sidetone is immediate.
    - Kill the client's Wi-Fi with PTT on → PTT opens within 3 s.
    - Stop the service with PTT on → the Nano opens PTT within 3 s (`!:WDOG`).
+   - Unplug the station Nano's USB with PTT on → PTT opens at once (the Nano loses power). Plug it back in: the service reconnects and re-arms it by itself.
+   - Unplug the client Nano's USB with PTT on → the client releases PTT gracefully (queued CW still goes out, then the hang). Plug it back in: the paddle works again without restarting the client.
 3. Connect to the 7610 into a dummy load at the IF with the transverter disabled. Check KEY polarity and PTT.
 4. Test from your phone's hotspot over the port-forward or tunnel.
 

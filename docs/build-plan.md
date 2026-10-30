@@ -17,7 +17,7 @@ The E220 modules usually ship from China and are the slowest item, so order earl
 
 - [x] 2× Ebyte E220-900T22D (the **900** version): arrived
 - [x] 2× 915 MHz SMA antennas: homemade from UT-141 semi-rigid (λ/4 at 927.125 MHz ≈ 81 mm)
-- [ ] 2× PC817 optocouplers
+- [x] 2× PC817 optocouplers: 2-channel board; remove all four `302` resistors (README section 1)
 - [ ] 2× DS18B20 waterproof probes
 - [ ] 1× BSS138 4-channel level shifter
 - [ ] 1× AMS1117-3.3 module
@@ -50,13 +50,14 @@ client and station talk to each other from outside the house.
 
 ## Phase 1: Station Nano on the bench
 
-- [ ] Flash the STATION image
-- [ ] Wire the two optocouplers to LEDs or a meter (**not** the radio)
-- [ ] Serial monitor: `V`, `?`, `T:CQ`, `P:1` / `P:0`, `U:2000` all behave
-- [ ] Run the station service against the Nano; send keyboard CW from the client over the LAN
-- [ ] Safety test: kill the client's Wi-Fi with PTT on → PTT drops within 3 s
-- [ ] Safety test: stop the station service with PTT on → PTT drops within 3 s (`!:WDOG`)
-- [ ] Safety test: unplug the Nano's USB with PTT on → PTT drops
+- [x] Flash the STATION image
+- [x] Wire the two optocouplers to LEDs or a meter (**not** the radio)
+- [x] Serial monitor: `V`, `?`, `T:CQ`, `P:1` / `P:0`, `U:2000` all behave
+- [x] Run the station service against the Nano; send keyboard CW from the client over the LAN
+- [x] Safety test: kill the client's Wi-Fi with PTT on → PTT drops within 3 s
+- [x] Safety test: stop the station service with PTT on → PTT drops within 3 s (`!:WDOG`)
+- [x] Safety test: unplug the station Nano's USB with PTT on → PTT drops at once
+- [x] Safety test: unplug the client Nano's USB with PTT on → PTT released gracefully; the paddle works again when plugged back in
 
 **Done when:** every safety test drops PTT within 3 seconds, every time.
 
@@ -64,15 +65,15 @@ client and station talk to each other from outside the house.
 
 ## Phase 2: Client Nano and paddle
 
-- [ ] Flash the CLIENT image
-- [ ] Wire the paddle jack, PTT button and sidetone (speed pot optional: `USE_SPEED_POT 1`)
-- [ ] Send at 15–20 WPM: the station's on-board LED and KEY opto follow about one character behind
-- [ ] Decoded text in the client matches what was sent
+- [x] Flash the CLIENT image
+- [x] Wire the paddle jack, PTT button and sidetone (speed pot optional: `USE_SPEED_POT 1`)
+- [x] Send at 15–20 WPM: the station's on-board LED and KEY opto follow about one character behind
+- [x] Decoded text in the client matches what was sent
 - [ ] Choose iambic A or B; swap paddles if needed (`config.h`)
 - [ ] Deliberately fumbled characters pass through as raw patterns (`{...}`)
-- [ ] PTT button toggles station PTT; the D12 PTT LED lights at both ends
-- [ ] Send a word and press PTT off right after the last character: it is keyed out in full, PTT drops about 2 s after the last element
-- [ ] Press PTT off, then keep sending within 2 s: PTT stays on and everything is keyed
+- [x] PTT button toggles station PTT; the D12 PTT LED lights at both ends
+- [x] Send a word and press PTT off right after the last character: it is keyed out in full, PTT drops about 2 s after the last element
+- [x] Press PTT off, then keep sending within 2 s: PTT stays on and everything is keyed
 
 **Done when:** a few minutes of normal sending comes out clean on the station side,
 and the PTT button and LED behave.
@@ -82,11 +83,11 @@ and the PTT button and LED behave.
 ## Phase 3: Connect to the 7610, nothing going up the tower
 
 - [ ] Disconnect or disable the tower IF feed; dummy load on the 7610's output
-- [ ] Choose the PTT input: ACC SEND (if the manual confirms it accepts a ground to TX) or MIC connector PTT
-- [ ] PTT opto → radio goes to TX and the DC injector puts 13 V on the IF cable
-- [ ] Y-cable the KEY opto alongside the SO2R+; keying polarity correct
-- [ ] N1MM+ CW through the SO2R+ still works
-- [ ] BK-IN set to OFF; keying with PTT off gives sidetone only
+- [x] Choose the PTT input: SO2R+ rear RCA PTT footswitch jack
+- [x] PTT opto → radio goes to TX and the DC injector puts 13 V on the IF cable
+- [x] Y-cable the KEY opto alongside the SO2R+; keying polarity correct
+- [x] N1MM+ CW through the SO2R+ still works
+- [x] BK-IN set to OFF; keying with PTT off gives sidetone only
 
 **Done when:** remote PTT and keying behave exactly like pressing TRANSMIT and using
 the paddle at the radio, and N1MM+ is unaffected.
@@ -107,7 +108,7 @@ the paddle at the radio, and N1MM+ is unaffected.
 
 ## Phase 5: remtlm on the bench (parallel with phases 1–4)
 
-- [ ] Optional: check each E220 with the FT232 adapter (README section 9): `python -m remkey.e220 --port ... --write` reads back channel 77, 9.6 kbps, 17 dBm
+- [x] Optional: check each E220 with the FT232 adapter (README section 9): `python -m remkey.e220 --port ... --write` reads back channel 77, 9.6 kbps, 17 dBm
 - [ ] Wire both E220s and Nanos; flash TOWER and BASE
 - [ ] Both print `C:ok ch=77 freq_khz=927125`
 - [ ] Packets arrive at the base; `tlmview` shows them
@@ -170,7 +171,7 @@ MKU's replies, with near-zero packet loss on the bench.
 
 ## Phase 8: Hardening
 
-- [ ] Station service starts automatically (Task Scheduler "At log on" → `host\Start-remkey.bat`)
+- [x] Station service starts automatically (Task Scheduler "At log on" → `host\Start-remkey.bat`)
 - [ ] Console QuickEdit off for the station user (`reg add HKCU\Console /v QuickEdit /t REG_DWORD /d 0 /f`)
 - [ ] Reboot test: before touching the window, a client connects and keys PTT; log lines appear without pressing Enter
 - [ ] Shack PC power plan: never sleep; USB selective suspend off
