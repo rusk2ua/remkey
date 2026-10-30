@@ -20,33 +20,59 @@ class KeyerLink(Protocol):
     def close(self) -> None: ...
 
 
+LOST = "#:LOST"     # synthetic lines the link reports itself (never sent by a Nano)
+BACK = "#:BACK"
+
+
 class SerialLink:
     """Talks to the Nano over USB serial.
 
     A background thread reads lines and hands them to the handler on the asyncio
     loop (via call_soon_threadsafe). Writes are synchronous and lock-protected;
     they are a few bytes at 115200 baud.
+
+    If the port fails (USB unplugged), the handler gets LOST once, writes are
+    dropped quietly, and the thread re-opens the port every second. When it is
+    back, the handler gets BACK so the owner can re-send its settings.
     """
 
-    def __init__(self, port: str, baud: int = 115200, loop: asyncio.AbstractEventLoop | None = None):
-        import serial  # pyserial; imported here so tests don't need it
+    def __init__(self, port: str, baud: int = 115200, loop: asyncio.AbstractEventLoop | None = None,
+                 opener: Callable[..., object] | None = None, retry_s: float = 1.0,
+                 boot_s: float = 2.0):
+        if opener is None:
+            import serial  # pyserial; imported here so tests don't need it
 
+            opener = serial.Serial
         self.port = port
+        self.baud = baud
+        self._open = opener
+        self._retry_s = retry_s
+        self._boot_s = boot_s
         self._loop = loop or asyncio.get_event_loop()
         self._handler: Callable[[str], None] = lambda line: None
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._ser = serial.Serial(port, baud, timeout=0.2)
-        # Opening the port resets a Nano (DTR). Give the bootloader time to hand over.
-        time.sleep(2.0)
-        self._ser.reset_input_buffer()
+        self._ser = self._connect()
+        self.up = True
         self._thread = threading.Thread(target=self._reader, name=f"keyer-{port}", daemon=True)
         self._thread.start()
+
+    def _connect(self):
+        ser = self._open(self.port, self.baud, timeout=0.2)
+        # Opening the port resets a Nano (DTR). Give the bootloader time to hand over.
+        time.sleep(self._boot_s)
+        ser.reset_input_buffer()
+        return ser
 
     def set_handler(self, handler: Callable[[str], None]) -> None:
         self._handler = handler
 
+    def _emit(self, line: str) -> None:
+        self._loop.call_soon_threadsafe(self._handler, line)
+
     def send(self, line: str) -> None:
+        if not self.up:
+            return
         data = (line + "\n").encode("ascii", errors="ignore")
         with self._lock:
             try:
@@ -54,14 +80,37 @@ class SerialLink:
             except Exception as exc:  # noqa: BLE001
                 log.error("keyer write failed on %s: %s", self.port, exc)
 
+    def _lost(self, exc: Exception) -> None:
+        log.error("keyer on %s lost: %s", self.port, exc)
+        with self._lock:
+            self.up = False
+            try:
+                self._ser.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self._emit(LOST)
+        while not self._stop.wait(self._retry_s):
+            try:
+                ser = self._connect()
+            except Exception:  # noqa: BLE001
+                continue
+            with self._lock:
+                self._ser = ser
+                self.up = True
+            log.warning("keyer on %s is back", self.port)
+            self._emit(BACK)
+            return
+
     def _reader(self) -> None:
         buf = b""
         while not self._stop.is_set():
             try:
                 chunk = self._ser.read(64)
             except Exception as exc:  # noqa: BLE001
-                log.error("keyer read failed on %s: %s", self.port, exc)
-                time.sleep(1.0)
+                if self._stop.is_set():
+                    return
+                buf = b""
+                self._lost(exc)
                 continue
             if not chunk:
                 continue
@@ -70,7 +119,7 @@ class SerialLink:
                 raw, buf = buf.split(b"\n", 1)
                 line = raw.decode("ascii", errors="replace").rstrip("\r")
                 if line:
-                    self._loop.call_soon_threadsafe(self._handler, line)
+                    self._emit(line)
 
     def close(self) -> None:
         self._stop.set()
@@ -144,6 +193,15 @@ class FakeLink:
     def inject(self, line: str) -> None:
         """Pretend the keyer sent us a line."""
         self._handler(line)
+
+    def unplug(self) -> None:
+        """Pretend the USB cable was pulled: the Nano's outputs go dead."""
+        self._cancel_release()
+        self.ptt = False
+        self._handler(LOST)
+
+    def replug(self) -> None:
+        self._handler(BACK)
 
     def close(self) -> None:
         pass

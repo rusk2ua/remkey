@@ -18,7 +18,7 @@ import time
 
 from . import protocol as P
 from .config import StationConfig, load_station
-from .serial_link import FakeLink, KeyerLink, SerialLink
+from .serial_link import BACK, LOST, FakeLink, KeyerLink, SerialLink
 from .telemetry import (
     CableFit,
     Calibration,
@@ -246,11 +246,14 @@ class StationService:
             tlm_link.set_handler(self.tlm.on_line)
 
     # ------------------------------------------------------------ lifecycle
-    async def start(self) -> None:
+    def _init_keyer(self) -> None:
         self.link.send("G:1")          # make sure the Nano watchdog is armed
         self.link.send(f"J:{max(0, min(10000, int(self.cfg.ptt_hang_ms)))}")
         self.link.send("O")            # PTT off and nothing queued, right now
         self.link.send("V")
+
+    async def start(self) -> None:
+        self._init_keyer()
         self.server = await asyncio.start_server(
             self._handle_client, self.cfg.listen_host, self.cfg.listen_port, limit=P.MAX_LINE
         )
@@ -312,6 +315,20 @@ class StationService:
                 self.releasing = False
             if s:
                 s.send_nowait(self._state())
+        elif line == LOST:
+            # USB unplugged: the Nano is unpowered, so both optos are already open
+            log.warning("station keyer USB disconnected: PTT and KEY are off")
+            self.ptt = False
+            self.releasing = False
+            if s:
+                s.send_nowait({"t": "log", "msg": "keyer USB disconnected - PTT is off"})
+                s.send_nowait(self._state())
+        elif line == BACK:
+            log.warning("station keyer reconnected")
+            self._init_keyer()
+            self.link.send(f"W:{min(50, self.wpm + self.cfg.wpm_offset)}")
+            if s:
+                s.send_nowait({"t": "log", "msg": "keyer reconnected"})
         elif line.startswith("!:"):
             log.warning("keyer watchdog: %s", line)
             self.ptt = False

@@ -28,7 +28,7 @@ import time
 
 from . import protocol as P
 from .config import ClientConfig, load_client
-from .serial_link import FakeLink, KeyerLink, SerialLink
+from .serial_link import BACK, LOST, FakeLink, KeyerLink, SerialLink
 
 log = logging.getLogger("remkey.client")
 
@@ -75,6 +75,7 @@ class ClientApp:
         self.releasing = False               # station finishing CW before dropping PTT
         self.ptt_switch_on = False           # latching PTT switch position (B:P / B:R / B:H)
         self.quit_wait_s = 15.0              # longest a quit waits for that
+        self.keyer_up = True                 # travel keyer USB present
         self._writer: asyncio.StreamWriter | None = None
         self._typed = ""     # buffer for <PROSIGN> typing
         self.tlm: dict | None = None
@@ -144,8 +145,10 @@ class ClientApp:
     def status(self) -> None:
         rtt = f"{self.rtt_ms:.0f} ms" if self.rtt_ms is not None else "n/a"
         link = "connected" if self.connected else "DISCONNECTED"
+        keyer = "" if self.keyer_up else " | travel keyer DISCONNECTED"
         self.console.event(
             f"station {link} | PTT {'ON' if self.station_ptt else 'off'} | {self.wpm} WPM | RTT {rtt}"
+            + keyer
         )
         if self.tlm:
             self.console.event(self.tlm_line(self.tlm))
@@ -212,8 +215,34 @@ class ClientApp:
                 self.console.event("no tower telemetry yet")
 
     # ------------------------------------------------------------ keyer events
+    def _init_keyer(self) -> None:
+        self.link.send(f"W:{self.wpm}")
+        self.link.send(f"F:{self.cfg.sidetone_hz}")
+        self.link.send("V")
+
+    def _keyer_lost(self) -> None:
+        """Travel keyer unplugged: the PTT button is gone, so release PTT gracefully."""
+        self.keyer_up = False
+        self.ptt_switch_on = False           # unknown now; the keyer reports B:H when it's back
+        if self.station_ptt and not self.releasing:
+            self._send({"t": "ptt", "on": False})
+            self.console.event("!! travel keyer disconnected - releasing PTT"
+                               " (queued CW is still sent; Ctrl-T to transmit again)")
+        else:
+            self.console.event("!! travel keyer disconnected - waiting for it to come back")
+
+    def _keyer_back(self) -> None:
+        self.keyer_up = True
+        self._init_keyer()
+        self.link.send(f"L:{1 if self.station_ptt else 0}")
+        self.console.event("travel keyer reconnected")
+
     def on_keyer_line(self, line: str) -> None:
-        if line.startswith("K:"):
+        if line == LOST:
+            self._keyer_lost()
+        elif line == BACK:
+            self._keyer_back()
+        elif line.startswith("K:"):
             ch = line[2:]
             if self.connected:
                 # paddle chars are already heard on the local sidetone: no echo
@@ -442,9 +471,7 @@ class ClientApp:
         self.link.send("L:0")
 
     async def run(self) -> None:
-        self.link.send(f"W:{self.wpm}")
-        self.link.send(f"F:{self.cfg.sidetone_hz}")
-        self.link.send("V")
+        self._init_keyer()
         while not self.quit.is_set():
             writer = None
             try:

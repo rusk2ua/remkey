@@ -364,3 +364,52 @@ def test_ptt_switch_config_validated(tmp_path):
         load_client(p)
     p.write_text(f'secret = "{SECRET}"\nptt_switch = "latching"\n')
     assert load_client(p).ptt_switch == "latching"
+
+
+# ----------------------------------------------------------------- keyer USB unplugged
+async def test_travel_keyer_unplugged_releases_ptt_gracefully(station):
+    svc, slink = station
+    svc.cfg.heartbeat_timeout_s = 3.0
+    ccfg = ClientConfig(secret=SECRET, station_host="127.0.0.1", station_port=svc.port,
+                        reconnect_s=0.1, heartbeat_s=0.1)
+    clink = FakeLink()
+    out = NullOut()
+    app = ClientApp(ccfg, clink, Console(out))
+    task = asyncio.create_task(app.run())
+    await wait_for(lambda: app.connected)
+
+    clink.inject("B:P")
+    await wait_for(lambda: svc.ptt)
+    clink.inject("K:T")
+    await wait_for(lambda: "T:T" in slink.sent)
+    clink.unplug()
+    await wait_for(lambda: svc.releasing)                # graceful, not a safety stop
+    assert "travel keyer disconnected - releasing PTT" in out.text
+    assert "O" not in slink.sent[3:]
+    await wait_for(lambda: not svc.ptt)
+    assert app.connected                                  # the station link stays up
+
+    n = len(clink.sent)
+    clink.replug()
+    assert "travel keyer reconnected" in out.text
+    assert clink.sent[n:] == ["W:18", "F:600", "V", "L:0"]
+    app.quit.set()
+    await asyncio.wait_for(task, 3)
+
+
+async def test_station_keyer_unplugged_and_back(station):
+    svc, link = station
+    svc.cfg.heartbeat_timeout_s = 3.0
+    reader, writer, _ = await raw_connect(svc.port)
+    writer.write(P.encode({"t": "ptt", "on": True}))
+    await writer.drain()
+    await wait_for(lambda: svc.ptt)
+    link.unplug()
+    assert not svc.ptt
+    m = await next_msg(reader, "log")
+    assert "disconnected" in m["msg"]
+    n = len(link.sent)
+    link.replug()
+    assert link.sent[n:n + 4] == ["G:1", "J:300", "O", "V"]
+    assert link.sent[n + 4].startswith("W:")
+    writer.close()
