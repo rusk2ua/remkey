@@ -19,17 +19,17 @@ It is two Arduino Nanos running the same sketch, plus a small Python bridge. An 
 
 ```
   TRAVEL END (Mac)                                         SHACK (Windows PC)
- ┌───────────────────────┐                              ┌──────────────────────────┐
- │ paddle ─┐             │                              │                          │
- │ PTT btn ┼─► CLIENT    │ USB  remkey.client   TCP/JSON │ remkey.station   USB      │
+ ┌───────────────────────┐                               ┌─────────────────────────────┐
+ │ paddle ─┐             │                               │                             │
+ │ PTT btn ┼─► CLIENT    │ USB  remkey.client   TCP/JSON │ remkey.station   USB        │
  │ speaker◄┘   Nano      ├────► (Python)  ─────────────────► (Python)  ──────► STATION │
- │  (local sidetone,     │      keyboard CW,  internet   │  auth, heartbeat,  Nano  │
- │   decodes paddle      │      hotkeys       (port-fwd  │  safety-off on     │     │
- │   to characters)      │                     or AnyDesk│  link loss         │     │
- └───────────────────────┘                     tunnel)   │       opto ─► KEY jack   │
-                                                         │       opto ─► PTT/SEND   │
-                                                         │  N1MM+ / SO2R+ untouched │
-                                                         └──────────────────────────┘
+ │  (local sidetone,     │      keyboard CW,  internet   │  auth, heartbeat,  Nano     │
+ │   decodes paddle      │      hotkeys       (port-fwd  │  safety-off on     │        │
+ │   to characters)      │                   or Tailscale│  link loss         │        │
+ └───────────────────────┘                     tunnel)   │       opto ─► KEY jack      │
+                                                         │       opto ─► PTT/SEND      │
+                                                         │  N1MM+ / SO2R+ untouched    │
+                                                         └─────────────────────────────┘
 ```
 
 ## Why it works this way
