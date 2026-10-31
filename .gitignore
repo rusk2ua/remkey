@@ -11,3 +11,4 @@ tests/firmware_sim/sim_*
 remkey-tlm.csv
 .ruff_cache/
 .venv/
+.DS_Store
