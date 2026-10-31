@@ -387,6 +387,7 @@ async def test_travel_keyer_unplugged_releases_ptt_gracefully(station):
     assert "travel keyer disconnected - releasing PTT" in out.text
     assert "O" not in slink.sent[3:]
     await wait_for(lambda: not svc.ptt)
+    await wait_for(lambda: not app.station_ptt)          # client has heard PTT is off
     assert app.connected                                  # the station link stays up
 
     n = len(clink.sent)
