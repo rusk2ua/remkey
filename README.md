@@ -453,6 +453,8 @@ VCC  ── 5 V ── 100 µF ── GND
 GND  ── GND
 ```
 
+![E220 to Nano schematic](docs/img/remtlm-e220-schematic.svg)
+
 ### Wiring: tower Nano to the MKU 10 G5 and PA
 
 ```
@@ -482,6 +484,12 @@ INA226 module: VCC ── 5V, GND ── GND, SDA ── A4, SCL ── A5   (A0
                                                         have a separate VBUS pin
 ```
 
+The same wiring as schematics, in two parts: the signals (PA sense, MKU CON1, level shifter and probes), then the power feed and supply monitor.
+
+![Tower Nano signals: PA sense, MKU CON1, level shifter, DS18B20 probes](docs/img/remtlm-tower-signals-schematic.svg)
+
+![Tower power: shunt and INA226, fuse, buck and 3.3 V regulator](docs/img/remtlm-tower-power-schematic.svg)
+
 **Notes:**
 
 - **Why analog for LD:** a 5 V Nano needs about 3.0 V to read a digital high, and LD gives only 3.3 V through 330 Ω. That's too close, so A2 compares against 1.65 V instead.
@@ -507,7 +515,7 @@ INA226 module: VCC ── 5V, GND ── GND, SDA ── A4, SCL ── A5   (A0
 
 ### Wiring: base Nano (radio room)
 
-Only the E220 block above, plus USB to the shack PC. Put the module and its antenna where it has the best view of the tower, for example a window. A USB extension cable is fine.
+Only the E220 block above (its schematic covers both ends), plus USB to the shack PC. Put the module and its antenna where it has the best view of the tower, for example a window. A USB extension cable is fine.
 
 ### Optional: check each E220 with a USB serial adapter
 
