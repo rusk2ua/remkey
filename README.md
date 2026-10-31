@@ -79,7 +79,8 @@ CONTRIBUTING.md, SECURITY.md   how to run the checks; security model and reporti
 |---|---|---|
 | 2 | Arduino Nano (ATmega328P) | Clones are fine. CH340 USB chips need no driver on current macOS or Windows. |
 | 2 | PC817 (or 4N25/4N35) optocoupler | Station only: one for KEY, one for PTT |
-| 2 | 470 Ω resistor | Opto LED current, about 8 mA (see below if you use a ready-made opto board) |
+| 2 | 470 Ω resistor | Opto LED current, about 8 mA with bare PC817s |
+| 2 | 220 Ω resistor | Instead of the 470 Ω, with a ready-made 2-channel opto board (its indicator LED drops extra voltage; see Station Nano) |
 | 1 | 3.5 mm stereo jack | Client paddle input |
 | 1 | Momentary pushbutton/footswitch, or an SPST toggle switch | Client PTT (set `ptt_switch` in `client.toml`) |
 | 1 | Piezo sounder or small speaker + 100 µF cap | Client sidetone; or feed a headphone amp |
@@ -89,17 +90,20 @@ CONTRIBUTING.md, SECURITY.md   how to run the checks; security model and reporti
 
 ### Client Nano (travel keyer)
 
-```
-Paddle jack tip  (dit) ──── D2        (internal pull-up; contact to GND)
-Paddle jack ring (dah) ──── D3
-Paddle jack sleeve ──────── GND
-PTT button ──────────────── D4 ── button ── GND
-D9 ── 220 Ω ── piezo(+)     piezo(−) ── GND
-     (or D9 ── 220 Ω ── 100 µF ── small amp/headphone input; 10 k to GND for level)
-Optional speed pot: ends to 5V/GND, wiper ── A0
-On-board LED (D13) flashes with every element you send
-Optional PTT LED: D12 ── 1k ── LED ── GND, lights when the STATION confirms PTT is on
-```
+![Client Nano schematic](docs/img/client-nano-schematic.svg)
+
+| Nano pin | Connects to | Notes |
+|---|---|---|
+| D2 | Paddle jack **tip** (dit) | Internal pull-up; the paddle contact closes to GND |
+| D3 | Paddle jack **ring** (dah) | Internal pull-up; the paddle contact closes to GND |
+| GND | Paddle jack **sleeve**, and the GND side of everything below | Common ground |
+| D4 | PTT switch, other side to GND | SPST toggle: `ptt_switch = "latching"`. Momentary button or footswitch: `ptt_switch = "momentary"` (in `client.toml`) |
+| D9 | 220 Ω → piezo (+); piezo (−) to GND | Sidetone. Or 220 Ω → 100 µF → small amp/headphone input, with 10 kΩ to GND for level |
+| D12 | 1 kΩ → LED anode; LED cathode to GND | Optional. Lights when the **station** confirms PTT is on |
+| A0 | 10 kΩ pot wiper; pot ends to 5V and GND | Optional speed knob. Set `USE_SPEED_POT 1` in `config.h` |
+| 5V | Top of the speed pot | Only needed with the pot |
+| D13 | On-board LED (no wiring) | Flashes with every element you send |
+| USB | Mac | Power and serial |
 
 Swap paddles in `config.h` (`SWAP_PADDLES`) instead of rewiring.
 
@@ -118,11 +122,21 @@ GND ────────┤2 cathode             emitter    3 ├── chas
             └───────────────────────────────────┘
 ```
 
+The block diagram above shows bare PC817 chips with 470 Ω drive. The schematic below uses a modified ready-made 2-channel PC817 board instead, driven through 220 Ω (details of the modification follow).
+
+![Station Nano schematic with the modified 2-channel PC817 board](docs/img/station-nano-schematic.svg)
+
+| Nano pin | Through | Board terminal | Board output | Goes to |
+|---|---|---|---|---|
+| D10 (KEY) | 220 Ω | IN1 | V1 | 7610 KEY jack tip, Y-cabled with the SO2R+ keying output |
+| D11 (PTT) | 220 Ω | IN2 | V2 | SO2R Box rear RCA **PTT** jack, center pin |
+| GND | — | G (input side) | G (output side) | KEY sleeve and RCA shell (radio-side ground; *not* tied to the Nano GND) |
+
 The optocouplers keep the Nano and PC USB ground galvanically separate from the radio, which matters on a station with a tower.
 
 **Ready-made 2-channel PC817 boards** (sold as "817 Module 2 Channel Isolation") need two changes before they'll work here. Each channel has a 3 kΩ chip resistor (marked `302`) on the input side **and another in series with the output**:
 
-- **Input 302:** in series with your own resistor it starves the LED (about 0.4 mA). Remove it and bridge the pads, then drive the LED from the Nano through about 220 Ω (the author used 470 Ω in parallel with 390 Ω): about 3 V across the board's input, LED clearly lit.
+- **Input 302:** in series with your own resistor it starves the LED (about 0.4 mA). Remove it and bridge the pads, then drive the LED from the Nano through 220 Ω: about 3 V across the board's input, LED clearly lit.
 - **Output 302:** it forms a divider with the radio-side pull-up, so the "closed" output only gets down to about 1.6 V into a footswitch input with a pull-up of a few kΩ. KEY may still work while PTT doesn't. Remove it and bridge the pads; the closed output then reads about 0.1–0.2 V.
 - The yellow jumper on each channel ties the output's emitter side to the board ground. Leave it off to keep the radio side fully isolated from the Nano.
 
