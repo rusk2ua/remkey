@@ -2,7 +2,9 @@
 
 Packets (see firmware/remtlm/tlm_proto.h):
     $RT,<seq>,<pa_pk_mv>,<pa_avg_mv>,<xv_pk_mv>,<lock>,<t1_c10>,<t2_c10>,<uptime_s>,<call>*HH
-    $RP,<seq>,<v_avg>,<v_min>,<v_max>,<i_avg>,<i_min>,<i_max>,<ok>,<call>*HH   supply (mV, mA)
+    $RP,<seq>,<v_avg>,<v_min>,<v_max>,<i_avg>,<i_min>,<i_max>,<ok>,<call>*HH   top-box supply (mV, mA)
+    $RS,<seq>,<v_avg>,<v_min>,<v_max>,<i_avg>,<i_min>,<i_max>,<ok>,<t_c10>,<uptime_s>,<call>*HH
+                                                       tower-base supply box (own seq)
     $RK,<id>,<cmd>,<part>,<total>,<text>,<call>*HH     transverter serial reply, in parts
 """
 
@@ -34,10 +36,14 @@ class Packet:
     call: str
 
 
+SRC_TOP = "top"      # $RP: INA226 in the tower-top box (optional), seq shared with $RT
+SRC_BASE = "base"    # $RS: INA226 in the supply box at the tower base, its own seq
+
+
 @dataclass
 class PowerPacket:
     seq: int
-    v_avg: float       # volts at the tower enclosure
+    v_avg: float       # volts where the INA226 is (see src)
     v_min: float
     v_max: float
     i_avg: float       # amps through the shunt
@@ -45,11 +51,14 @@ class PowerPacket:
     i_max: float
     ok: bool           # False: INA226 not answering, values are 0
     call: str
+    src: str = SRC_TOP
+    temp_c: float | None = None    # $RS only: supply-box temperature
+    uptime_s: int | None = None    # $RS only: PSU Nano uptime
 
     def scaled(self, v_scale: float, i_scale: float) -> PowerPacket:
         return PowerPacket(self.seq, self.v_avg * v_scale, self.v_min * v_scale, self.v_max * v_scale,
                            self.i_avg * i_scale, self.i_min * i_scale, self.i_max * i_scale,
-                           self.ok, self.call)
+                           self.ok, self.call, self.src, self.temp_c, self.uptime_s)
 
 
 @dataclass
@@ -86,7 +95,7 @@ def _temp(c10: str) -> float | None:
 
 
 def parse_any(line: str):
-    """Return a Packet, PowerPacket, ReplyPart, or None for anything else / bad checksum."""
+    """Return a Packet, PowerPacket ($RP or $RS), ReplyPart, or None for anything else / bad checksum."""
     body = _checked_body(line)
     if body is None:
         return None
@@ -107,6 +116,14 @@ def parse_any(line: str):
             mv = [int(x) / 1000.0 for x in f[2:8]]
             return PowerPacket(seq=int(f[1]), v_avg=mv[0], v_min=mv[1], v_max=mv[2],
                                i_avg=mv[3], i_min=mv[4], i_max=mv[5], ok=f[8] == "1", call=f[9])
+        if body.startswith("RS,"):
+            f = body.split(",")
+            if len(f) != 12:
+                return None
+            mv = [int(x) / 1000.0 for x in f[2:8]]
+            return PowerPacket(seq=int(f[1]), v_avg=mv[0], v_min=mv[1], v_max=mv[2],
+                               i_avg=mv[3], i_min=mv[4], i_max=mv[5], ok=f[8] == "1", call=f[11],
+                               src=SRC_BASE, temp_c=_temp(f[9]), uptime_s=int(f[10]))
         if body.startswith("RK,"):
             head = body.split(",", 5)            # RK,id,cmd,part,total,rest
             if len(head) != 6:
@@ -142,6 +159,14 @@ def format_power(p: PowerPacket) -> str:
     """Inverse of parse_any for $RP (used by tests)."""
     v = [round(x * 1000) for x in (p.v_avg, p.v_min, p.v_max, p.i_avg, p.i_min, p.i_max)]
     return _seal(f"RP,{p.seq},{v[0]},{v[1]},{v[2]},{v[3]},{v[4]},{v[5]},{int(p.ok)},{p.call}")
+
+
+def format_supply(p: PowerPacket) -> str:
+    """Inverse of parse_any for $RS (used by tests and the bench simulator)."""
+    v = [round(x * 1000) for x in (p.v_avg, p.v_min, p.v_max, p.i_avg, p.i_min, p.i_max)]
+    t = TEMP_NONE if p.temp_c is None else int(round(p.temp_c * 10))
+    return _seal(f"RS,{p.seq},{v[0]},{v[1]},{v[2]},{v[3]},{v[4]},{v[5]},{int(p.ok)},{t},"
+                 f"{p.uptime_s or 0},{p.call}")
 
 
 def format_reply(capture: int, cmd: str, text: str, call: str = "K2UA", chunk: int = 48) -> list[str]:
@@ -277,11 +302,12 @@ class LinkStats:
     last_rx: float | None = None
     recent: list = field(default_factory=list)   # (time, lost_before_this) for loss %
 
-    def update(self, p: Packet, now: float | None = None) -> None:
+    def update(self, p: Packet | PowerPacket, now: float | None = None) -> None:
+        """p needs .seq and .uptime_s: a tower $RT, or a supply-box $RS."""
         now = time.monotonic() if now is None else now
         gap = 0
         if self.last_uptime is not None and p.uptime_s < self.last_uptime:
-            self.resets += 1                       # tower rebooted: seq restarted
+            self.resets += 1                       # sender rebooted: seq restarted
         elif self.last_seq is not None:
             gap = (p.seq - self.last_seq - 1) % 65536
             if gap > 1000:                         # nonsense jump: treat as resync
@@ -308,12 +334,19 @@ class LinkStats:
 class CsvLog:
     """Appends one row per reporting interval. Opens the file per write so it's safe to read live.
 
+    One row per tower $RT. While the tower is silent, one row per supply-box $RS
+    instead, with the tower columns empty. The v_* / i_* columns hold the supply
+    reading for the interval: from the base box when it is reporting
+    (supply_at = "base"), else from a top-box INA226 (supply_at = "top").
+    top_v_avg is the top-box voltage when both are reporting.
+
     If an existing file has a different header (an older remkey version), it is
     renamed to <name>.<timestamp>.csv and a fresh file is started.
     """
 
     HEADER = ["time", "seq", "pa_pk_mv", "pa_avg_mv", "pa_pk_w", "pa_avg_w",
               "xv_pk_mv", "ref_lock", "temp1_c", "temp2_c", "uptime_s",
+              "supply_at", "box_temp_c", "top_v_avg",
               "v_avg", "v_min", "v_max", "i_avg", "i_min", "i_max"]
 
     def __init__(self, path: str):
@@ -327,20 +360,26 @@ class CsvLog:
             with self.path.open("w", newline="", encoding="utf-8") as f:
                 csv.writer(f).writerow(self.HEADER)
 
-    def write(self, p: Packet, pa_pk_w: float | None, pa_avg_w: float | None,
-              pwr: PowerPacket | None = None) -> None:
+    def write(self, p: Packet | None, pa_pk_w: float | None, pa_avg_w: float | None,
+              pwr: PowerPacket | None = None, top: PowerPacket | None = None) -> None:
+        """p None = supply-only row (tower silent). top = top-box reading when pwr is the base box's."""
         def f3(x):
             return f"{x:.3f}"
 
+        ok = pwr is not None and pwr.ok
         power = ([f3(pwr.v_avg), f3(pwr.v_min), f3(pwr.v_max), f3(pwr.i_avg), f3(pwr.i_min),
-                  f3(pwr.i_max)] if pwr is not None and pwr.ok else [""] * 6)
+                  f3(pwr.i_max)] if ok else [""] * 6)
+        supply = [pwr.src if ok else "",
+                  "" if pwr is None or pwr.temp_c is None else pwr.temp_c,
+                  f3(top.v_avg) if top is not None and top.ok else ""]
+        if p is None:
+            tower = [pwr.seq if pwr is not None else ""] + [""] * 9
+        else:
+            tower = [p.seq, p.pa_pk_mv, p.pa_avg_mv,
+                     "" if pa_pk_w is None else f"{pa_pk_w:.2f}",
+                     "" if pa_avg_w is None else f"{pa_avg_w:.2f}",
+                     p.xv_pk_mv, "" if p.lock is None else int(p.lock),
+                     "" if p.temp_c is None else p.temp_c,
+                     "" if p.temp2_c is None else p.temp2_c, p.uptime_s]
         with self.path.open("a", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow([
-                time.strftime("%Y-%m-%d %H:%M:%S"), p.seq, p.pa_pk_mv, p.pa_avg_mv,
-                "" if pa_pk_w is None else f"{pa_pk_w:.2f}",
-                "" if pa_avg_w is None else f"{pa_avg_w:.2f}",
-                p.xv_pk_mv, "" if p.lock is None else int(p.lock),
-                "" if p.temp_c is None else p.temp_c,
-                "" if p.temp2_c is None else p.temp2_c, p.uptime_s,
-                *power,
-            ])
+            csv.writer(f).writerow([time.strftime("%Y-%m-%d %H:%M:%S"), *tower, *supply, *power])

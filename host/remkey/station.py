@@ -20,6 +20,7 @@ from . import protocol as P
 from .config import StationConfig, load_station
 from .serial_link import BACK, LOST, FakeLink, KeyerLink, SerialLink
 from .telemetry import (
+    SRC_BASE,
     CableFit,
     Calibration,
     CsvLog,
@@ -56,7 +57,12 @@ class Session:
 
 
 class TelemetryHub:
-    """Turns remtlm packets from the base Nano into calibrated readings and alerts."""
+    """Turns remtlm packets from the base Nano into calibrated readings and alerts.
+
+    Two senders share the LoRa channel: the tower-top box ($RT, $RK and, if it has
+    its own INA226, $RP) and the supply box at the tower base ($RS). Each has its
+    own link statistics and stale alert.
+    """
 
     def __init__(self, cfg: StationConfig, notify):
         self.cfg = cfg
@@ -73,10 +79,15 @@ class TelemetryHub:
         self.stale = True
         names = list(cfg.temp_names) + ["probe 1", "probe 2"]
         self.temp_names = [str(names[0]), str(names[1])]
-        self.pwr: PowerPacket | None = None          # latest $RP, scaled
+        self.pwr: PowerPacket | None = None          # latest top-box $RP, scaled
         self.pwr_time = 0.0
-        self.fit = CableFit()
-        self.pwr_flags = {"low": False, "high": False, "imax": False, "imin": False, "dead": False}
+        self.box: PowerPacket | None = None          # latest supply-box $RS, scaled
+        self.box_time = 0.0
+        self.box_stats = LinkStats()
+        self.box_stale = True
+        self.box_hot = False
+        self.fit = CableFit()                        # needs top-box voltage
+        self.pwr_flags: dict[str, bool] = {}
 
     def on_line(self, line: str) -> None:
         p = parse_any(line)
@@ -95,12 +106,9 @@ class TelemetryHub:
         self.stats.update(p)
         pa_pk_w = self.pa_cal.watts(p.pa_pk_mv)
         pa_avg_w = self.pa_cal.watts(p.pa_avg_mv)
-        pwr = self.pwr if (self.pwr is not None and self.pwr.seq == p.seq) else None
-        if self.csv:
-            try:
-                self.csv.write(p, pa_pk_w, pa_avg_w, pwr)
-            except OSError as exc:
-                log.warning("telemetry CSV: %s", exc)
+        top = self.pwr if (self.pwr is not None and self.pwr.seq == p.seq) else None
+        box = self.box if (self.box is not None and not self.box_stale) else None
+        self._csv(p, pa_pk_w, pa_avg_w, box or top, top if box else None)
         self.latest = {
             "t": "tlm",
             "seq": p.seq,
@@ -138,52 +146,119 @@ class TelemetryHub:
         self.notify(self.latest)
 
     # ------------------------------------------------------------ supply monitor
+    def _csv(self, p, pa_pk_w, pa_avg_w, pwr, top) -> None:
+        if not self.csv:
+            return
+        try:
+            self.csv.write(p, pa_pk_w, pa_avg_w, pwr, top)
+        except OSError as exc:
+            log.warning("telemetry CSV: %s", exc)
+
     def _on_power(self, raw: PowerPacket) -> None:
         cfg = self.cfg
-        self.pwr = p = raw.scaled(cfg.v_scale, cfg.i_scale)
+        p = raw.scaled(cfg.v_scale, cfg.i_scale)
+        if p.src == SRC_BASE:
+            self._on_box(p)
+            return
+        self.pwr = p
         self.pwr_time = time.time()
-        self._flag("dead", not p.ok, "tower supply monitor (INA226) not answering",
-                   "tower supply monitor answering again")
+        self._flag("dead:top", not p.ok, "tower-top supply monitor (INA226) not answering",
+                   "tower-top supply monitor answering again")
         if not p.ok:
             return
         self.fit.add(p.i_avg, p.v_avg)
+        self._voltage_alerts(p, "tower-top supply", "top")
+        if self.box is None or self.box_stale:       # the base box measures current when it's there
+            self._current_alerts(p)
+        self.notify(self.power_message())
+
+    def _on_box(self, p: PowerPacket) -> None:
+        cfg = self.cfg
+        self.box_stats.update(p)
+        self.box = p
+        self.box_time = time.time()
+        if self.box_stale:
+            self.box_stale = False
+            self._alert("ok", "tower-base supply box link up")
+        t = p.temp_c
+        if t is not None and cfg.box_temp_warn_c:
+            if not self.box_hot and t >= cfg.box_temp_warn_c:
+                self.box_hot = True
+                self._alert("warn", f"{cfg.box_temp_name} HOT: {t:.1f} C")
+            elif self.box_hot and t < cfg.box_temp_warn_c - 3:
+                self.box_hot = False
+                self._alert("ok", f"{cfg.box_temp_name} back to {t:.1f} C")
+        self._flag("dead:base", not p.ok, "tower-base supply monitor (INA226) not answering",
+                   "tower-base supply monitor answering again")
+        if self.stale:                               # no tower rows to ride on: log on our own
+            self._csv(None, None, None, p, None)
+        if not p.ok:
+            return
+        self._voltage_alerts(p, "supply at tower base", "base")
+        self._current_alerts(p)
+        self.notify(self.power_message())
+
+    def _voltage_alerts(self, p: PowerPacket, where: str, key: str) -> None:
+        cfg = self.cfg
         if cfg.v_min_alert:
-            self._flag("low", p.v_min < cfg.v_min_alert if not self.pwr_flags["low"]
-                       else p.v_min < cfg.v_min_alert + 0.2,
-                       f"tower supply LOW: {p.v_min:.2f} V (at up to {p.i_max:.2f} A)",
-                       f"tower supply back to {p.v_min:.2f} V")
+            low = self.pwr_flags.get(f"low:{key}", False)
+            self._flag(f"low:{key}", p.v_min < (cfg.v_min_alert + 0.2 if low else cfg.v_min_alert),
+                       f"{where} LOW: {p.v_min:.2f} V (at up to {p.i_max:.2f} A)",
+                       f"{where} back to {p.v_min:.2f} V")
         if cfg.v_max_alert:
-            self._flag("high", p.v_max > cfg.v_max_alert if not self.pwr_flags["high"]
-                       else p.v_max > cfg.v_max_alert - 0.2,
-                       f"tower supply HIGH: {p.v_max:.2f} V", f"tower supply back to {p.v_max:.2f} V")
+            high = self.pwr_flags.get(f"high:{key}", False)
+            self._flag(f"high:{key}", p.v_max > (cfg.v_max_alert - 0.2 if high else cfg.v_max_alert),
+                       f"{where} HIGH: {p.v_max:.2f} V", f"{where} back to {p.v_max:.2f} V")
+
+    def _current_alerts(self, p: PowerPacket) -> None:
+        cfg = self.cfg
         if cfg.i_max_alert:
-            self._flag("imax", p.i_max > cfg.i_max_alert if not self.pwr_flags["imax"]
-                       else p.i_max > cfg.i_max_alert * 0.95,
+            on = self.pwr_flags.get("imax", False)
+            self._flag("imax", p.i_max > (cfg.i_max_alert * 0.95 if on else cfg.i_max_alert),
                        f"tower current HIGH: {p.i_max:.2f} A peak (limit {cfg.i_max_alert:.2f} A)",
                        f"tower current back to {p.i_max:.2f} A peak")
         if cfg.i_min_alert:
-            self._flag("imin", p.i_avg < cfg.i_min_alert if not self.pwr_flags["imin"]
-                       else p.i_avg < cfg.i_min_alert * 1.05,
+            on = self.pwr_flags.get("imin", False)
+            self._flag("imin", p.i_avg < (cfg.i_min_alert * 1.05 if on else cfg.i_min_alert),
                        f"tower current LOW: {p.i_avg:.2f} A (expected at least {cfg.i_min_alert:.2f} A)",
                        f"tower current back to {p.i_avg:.2f} A")
-        self.notify(self.power_message())
 
     def _flag(self, key: str, active: bool, warn_msg: str, ok_msg: str) -> None:
-        if active and not self.pwr_flags[key]:
+        was = self.pwr_flags.get(key, False)
+        if active and not was:
             self.pwr_flags[key] = True
             self._alert("warn", warn_msg)
-        elif not active and self.pwr_flags[key]:
+        elif not active and was:
             self.pwr_flags[key] = False
             self._alert("ok", ok_msg)
 
     def power_message(self, detail: bool = False) -> dict:
-        p = self.pwr
+        """Supply summary for the client.
+
+        Uses the base box when it is reporting, else the top-box INA226. With both,
+        drop_v is measured (base minus top); with only the top box it is against
+        base_supply_v from the config; with only the base box it is unknown (None).
+        """
+        now = time.time()
+        box = self.box if (self.box is not None and not self.box_stale) else None
+        top = self.pwr if (self.pwr is not None and now - self.pwr_time <= self.cfg.tlm_stale_s) else None
+        p = box or top or self.box or self.pwr
         if p is None:
             return {"t": "pwr", "ok": False, "none": True}
-        msg = {"t": "pwr", "ok": p.ok, "v_avg": p.v_avg, "v_min": p.v_min, "v_max": p.v_max,
+        at = p.src
+        msg = {"t": "pwr", "ok": p.ok, "at": at, "v_avg": p.v_avg, "v_min": p.v_min, "v_max": p.v_max,
                "i_avg": p.i_avg, "i_min": p.i_min, "i_max": p.i_max,
-               "base_v": self.cfg.base_supply_v, "drop_v": self.cfg.base_supply_v - p.v_avg,
-               "age_s": round(time.time() - self.pwr_time)}
+               "age_s": round(now - (self.box_time if p is self.box else self.pwr_time))}
+        if at == SRC_BASE:
+            ok_top = top is not None and top.ok
+            msg.update({"base_v": p.v_avg, "top_v": top.v_avg if ok_top else None,
+                        "drop_v": p.v_avg - top.v_avg if ok_top else None,
+                        "box_temp_c": p.temp_c, "box_temp_name": self.cfg.box_temp_name,
+                        "box_loss_pct": round(self.box_stats.loss_pct_5min(), 1),
+                        "box_stale": self.box_stale})
+        else:
+            msg.update({"base_v": self.cfg.base_supply_v, "top_v": p.v_avg,
+                        "drop_v": self.cfg.base_supply_v - p.v_avg})
         if detail:
             msg["query"] = True
             fit = self.fit.result()
@@ -193,6 +268,7 @@ class TelemetryHub:
                             "one_way_ft": self.cfg.cable_one_way_ft})
             msg["fit"] = fit
             msg["fit_points"] = len(self.fit.pts)
+            msg["fit_possible"] = self.pwr is not None    # needs a top-box INA226
         return msg
 
     def _on_reply(self, rp: ReplyPart) -> None:
@@ -215,6 +291,10 @@ class TelemetryHub:
         if not self.stale and (age is None or age > self.cfg.tlm_stale_s):
             self.stale = True
             self._alert("warn", f"tower telemetry lost (no packet for {self.cfg.tlm_stale_s:.0f} s)")
+        age = self.box_stats.age_s()
+        if not self.box_stale and (age is None or age > self.cfg.tlm_stale_s):
+            self.box_stale = True
+            self._alert("warn", f"tower-base supply box lost (no packet for {self.cfg.tlm_stale_s:.0f} s)")
 
     def snapshot(self) -> dict | None:
         if self.latest is None:

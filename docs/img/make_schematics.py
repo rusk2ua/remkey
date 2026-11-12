@@ -391,6 +391,128 @@ def tlm_power():
         halign="left", **NOTE))
     d.save(f"{OUT}/remtlm-tower-power-schematic.svg")
 
+# ------------------------------------------------------------------ tower-base supply box (PSU node)
+def tlm_psu():
+    d = schemdraw.Drawing(show=False)
+    # heavy path: supply output -> tap for the box's own 5 V -> shunt -> tower cable
+    d.add(elm.Dot(open=True).at((0, 0)).label("+14 V\nsupply output", loc="left"))
+    d.add(elm.Line().right().length(1.5))
+    tap = d.add(elm.Dot()).center
+    d.add(elm.Line().right().length(1.5))
+    sh = d.add(elm.RBox().right().length(4.5)
+               .label("20 A / 75 mV shunt (3.75 mΩ)", loc="top", ofst=0.7))
+    d.add(elm.Line().right().length(12.5))
+    d.add(elm.Dot(open=True).label("→ tower cable (+)\n   (heavy wire)", loc="right"))
+    d.add(elm.Label().at((sh.start.x, 0.45)).label("bolt", fontsize=9, color=GRAY))
+    d.add(elm.Label().at((sh.end.x, 0.45)).label("bolt", fontsize=9, color=GRAY))
+
+    # INA226 on the shunt's sense screws
+    s1 = (sh.start.x + 0.5, 0)
+    s2 = (sh.end.x - 0.5, 0)
+    SP = 1.4
+    ina = d.add(_box(
+        pins=[elm.IcPin(name="IN+", side="top"), elm.IcPin(name="IN−", side="top"),
+              elm.IcPin(name="VBUS", side="top"),
+              elm.IcPin(name="SCL", side="right"), elm.IcPin(name="SDA", side="right"),
+              elm.IcPin(name="GND", side="right"), elm.IcPin(name="VCC", side="right")],
+        pinspacing=SP, edgepadW=0.9, edgepadH=1.4, leadlen=0.8,
+        label="INA226\n(CJMCU-226)", lblsize=12).anchor("IN+").at((s1[0], -3.0)))
+    ip, im, vb = ina.absanchors["IN+"], ina.absanchors["IN−"], ina.absanchors["VBUS"]
+    for s, side in ((s1, 1), (s2, -1)):
+        d.add(elm.Dot().at(s))
+        d.add(elm.Label().at((s[0] + 0.15 * side, -0.4)).label(
+            "sense", fontsize=9, color=GRAY, halign="left" if side > 0 else "right"))
+    _wire(d, s1, ip)
+    yb = -1.7
+    _wire(d, s2, (s2[0], yb), (im.x, yb), im)
+    _wire(d, vb, (vb.x, yb))
+    d.add(elm.Dot().at((im.x, yb)))
+    d.add(elm.Dot().at((vb.x, yb)) if vb.x <= s2[0] else elm.Line().at((s2[0], yb)).to((vb.x, yb)))
+    d.add(elm.Label().at((s2[0] + 0.4, yb)).label(
+        "VBUS (if the module has one) to IN−", halign="left", fontsize=9, color=GRAY))
+
+    # PSU Nano, I2C pins aligned with the INA226; D5 for the box probe on the right
+    XN = ina.absanchors["SCL"].x + 5.5
+    nano = d.add(_box(
+        pins=[elm.IcPin(name="A5", side="left"), elm.IcPin(name="A4", side="left"),
+              elm.IcPin(name="GND", side="left"), elm.IcPin(name="5V", side="left"),
+              elm.IcPin(name="D5", side="right", slot="2/4")],
+        pinspacing=SP, edgepadW=1.6, edgepadH=1.4, leadlen=0.8,
+        label="PSU\nNano", lblsize=13).anchor("A5").at((XN, ina.absanchors["SCL"].y)))
+    for a, b in (("SCL", "A5"), ("SDA", "A4"), ("VCC", "5V")):
+        _wire(d, ina.absanchors[a], nano.absanchors[b])
+    pa, pb = ina.absanchors["VCC"], nano.absanchors["5V"]
+    d.add(elm.Label().at(((pa.x + pb.x) / 2, pa.y + 0.3)).label("+5V", fontsize=10, color=GRAY))
+    pa, pb = ina.absanchors["GND"], nano.absanchors["GND"]
+    _wire(d, pa, pb)
+    gx = pb.x - 1.5
+    d.add(elm.Dot().at((gx, pa.y)))
+    d.add(elm.Line().down().at((gx, pa.y)).length(0.4))
+    d.add(elm.Ground())
+
+    # DS18B20 box probe on D5 with its 4.7k pull-up
+    d5 = nano.absanchors["D5"]
+    d.add(elm.Line().right().at(d5).length(1.2))
+    j = d.add(elm.Dot()).center
+    d.add(elm.Resistor().up().at(j).length(1.6).label("4.7k", loc="bottom"))
+    d.add(elm.Vdd().label("+5V"))
+    d.add(elm.Line().right().at(j).length(1.6))
+    pr = d.add(_box(
+        pins=[elm.IcPin(name="DQ", side="left"), elm.IcPin(name="VDD", side="bottom", slot="1/2"),
+              elm.IcPin(name="GND", side="bottom", slot="2/2")],
+        pinspacing=1.0, edgepadW=1.2, edgepadH=0.6, leadlen=0.5,
+        label="DS18B20\n(box temp)", lblsize=11).anchor("DQ").at(d.here))
+    _net(d, pr.absanchors["VDD"], "+5V", "down", 0.4)
+    d.add(elm.Ground().at(pr.absanchors["GND"]))
+
+    # box logic supply: tapped ahead of the shunt -> fuse -> buck (5.0 V)
+    d.add(elm.Line().at(tap).down().length(0.8))
+    d.add(elm.Fuse().down().length(2.0).label("1 A", loc="bottom"))
+    f_end = d.here
+    buck = d.add(_box(
+        pins=[elm.IcPin(name="IN−", side="left"), elm.IcPin(name="IN+", side="left"),
+              elm.IcPin(name="OUT−", side="right"), elm.IcPin(name="OUT+", side="right")],
+        pinspacing=1.6, edgepadW=1.4, leadlen=0.6,
+        label="buck\n(MP1584)\nset 5.0 V", lblsize=11).anchor("IN+").at((f_end[0] - 9.0, f_end[1] - 3.4)))
+    _wire(d, f_end, (f_end[0], f_end[1] - 1.0), (buck.absanchors["IN+"].x - 0.8, f_end[1] - 1.0),
+          (buck.absanchors["IN+"].x - 0.8, buck.absanchors["IN+"].y), buck.absanchors["IN+"])
+    p = buck.absanchors["IN−"]
+    d.add(elm.Line().left().at(p).length(0.8))
+    d.add(elm.Line().down().length(0.4))
+    d.add(elm.Ground())
+    p = buck.absanchors["OUT−"]
+    d.add(elm.Line().right().at(p).length(0.6))
+    d.add(elm.Line().down().length(0.4))
+    d.add(elm.Ground())
+    o = buck.absanchors["OUT+"]
+    d.add(elm.Line().right().at(o).length(1.2))
+    d.add(elm.Line().up().length(0.6))
+    d.add(elm.Vdd().label("+5V"))
+
+    # notes
+    ymin = min(ina.get_bbox(transform=True).ymin, buck.get_bbox(transform=True).ymin) - 1.2
+    d.add(elm.Label().at((0, ymin)).label(
+        "INA226: A0/A1 address pins to GND (0x40).  Remove the module's own R100 shunt "
+        "(or set SHUNT_UOHM 3614).", halign="left", fontsize=10, color=RED))
+    d.add(elm.Label().at((0, ymin - 0.8)).label(
+        "The whole shunt sits at the supply voltage: insulating base or standoffs, terminals covered.",
+        halign="left", fontsize=10, color=RED))
+    d.add(elm.Label().at((0, ymin - 1.8)).label(
+        "The box's own 5 V is tapped on the supply side of the shunt, so the INA226 measures only "
+        "what goes up the tower.\n"
+        "+5V feeds: Nano 5V pin (not VIN), E220 VCC, DS18B20, INA226 VCC.   "
+        "E220 to Nano: same wiring as the other remtlm Nanos.", halign="left", **NOTE))
+    d.add(elm.Dot(open=True).at((0, ymin - 3.4)).label("supply (−) / tower cable (−)", loc="left"))
+    d.add(elm.Line().right().length(1.0))
+    d.add(elm.Ground())
+    d.add(elm.Label().at((1.8, ymin - 3.4)).label(
+        "one common ground: supply (−), buck, Nano, E220, INA226, DS18B20",
+        halign="left", **NOTE))
+    d.save(f"{OUT}/remtlm-psu-box-schematic.svg")
+    if os.environ.get("REMKEY_PNG"):
+        d.save(f"{OUT}/remtlm-psu-box-schematic.png", dpi=90)
+
+
 # ------------------------------------------------------------------ tower signals
 def tlm_signals():
     d = schemdraw.Drawing(show=False)
@@ -495,4 +617,5 @@ client()
 station()
 tlm_e220()
 tlm_power()
+tlm_psu()
 tlm_signals()

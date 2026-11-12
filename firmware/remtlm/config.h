@@ -1,10 +1,13 @@
-// remtlm configuration: tower-top telemetry over an Ebyte E220-900T22D LoRa link.
-// Build the TOWER image for the Nano at the tower top and the BASE image for the
-// Nano in the radio room (plugged into the shack PC by USB).
+// remtlm configuration: tower telemetry over an Ebyte E220-900T22D LoRa link.
+// Three images from one sketch:
+//   TOWER  Nano at the tower top: PA, transverter, temperatures
+//   PSU    Nano in the supply box at the tower base: supply voltage/current, box temperature
+//   BASE   Nano in the radio room, plugged into the shack PC by USB: receives both
 #pragma once
 
 #define ROLE_TOWER 1
 #define ROLE_BASE  2
+#define ROLE_PSU   3
 
 #ifndef REMTLM_ROLE
 #define REMTLM_ROLE ROLE_TOWER
@@ -29,7 +32,7 @@
 #define LORA_TX_POWER    POWER_17               // POWER_22/17/13/10 dBm
 
 // ---------------------------------------------------------------------------
-// Pins (both roles). E220 logic is 3.3 V: see the README for the dividers.
+// Pins (all roles). E220 logic is 3.3 V: see the README for the dividers.
 // ---------------------------------------------------------------------------
 #define PIN_E220_TXD   7    // Nano RX  <- E220 TXD
 #define PIN_E220_RXD   8    // Nano TX  -> divider -> E220 RXD
@@ -38,14 +41,16 @@
 #define PIN_E220_M1    10   // Nano out -> divider -> E220 M1
 #define PIN_LED        13
 
-// Tower-only
+// TOWER and PSU
+#define PIN_ONEWIRE    5    // DS18B20 probes (4.7k pull-up to 5 V); tower: up to 2, PSU: 1
+// A4 = SDA, A5 = SCL: INA226 supply monitor (fixed by the Nano's I2C hardware)
+
+// TOWER only
 #define PIN_PA_SENSE   A0   // PA power-sense output (0-5 V) via divider
 #define PIN_XV_SENSE   A1   // MKU 10 G5 CON1 pin 9 MON via divider
 #define PIN_LO_LOCK    A2   // MKU 10 G5 CON1 pin 16 LD (3.3 V = locked), read as analog
-#define PIN_ONEWIRE    5    // DS18B20 probes (4.7k pull-up to 5 V); up to 2 on one bus
 #define PIN_XV_RX      11   // Nano RX  <- level shifter <- MKU CON1 pin 11 TXD
 #define PIN_XV_TX      12   // Nano TX  -> level shifter -> MKU CON1 pin 12 RXD
-// A4 = SDA, A5 = SCL: INA226 supply monitor (fixed by the Nano's I2C hardware)
 
 // ---------------------------------------------------------------------------
 // Analog scaling (tower). The host converts mV to watts with your calibration
@@ -77,8 +82,11 @@
 #define XV_BUF            240      // longest reply kept (bytes)
 
 // ---------------------------------------------------------------------------
-// Tower supply monitor: INA226 on I2C with a high-side shunt in the 13.8 V feed
-// at the enclosure entry, ahead of everything in the box.
+// Supply monitor: INA226 on I2C with a high-side shunt in the + feed.
+//   PSU role:   always on. Shunt at the supply output, ahead of the tower cable;
+//               the PSU Nano's own 5 V is taken from the supply side of the shunt.
+//   TOWER role: optional (PWR_ENABLE 1), a second INA226 + shunt at the top-box
+//               entry. With both, the host shows the measured cable drop.
 //   SHUNT_UOHM: shunt resistance in micro-ohms. The INA226 reads at most 81.92 mV
 //               across the shunt, so this sets the full-scale current.
 //               3750 = 20 A / 75 mV panel-meter shunt: 21.8 A full scale, 0.67 mA steps.
@@ -87,17 +95,31 @@
 //               the 3.75 mOhm shunt it reads 3.6% low (or set 3614).
 //   Trim small gain errors against a DMM with v_scale / i_scale in station.toml.
 // ---------------------------------------------------------------------------
-#define PWR_ENABLE       1
+#ifndef PWR_ENABLE
+#define PWR_ENABLE       0        // TOWER only: 1 = INA226 in the top box too
+#endif
 #define INA226_ADDR      0x40     // A0 and A1 address pins to GND
 #define SHUNT_UOHM       3750L    // 20 A / 75 mV panel shunt
 #define PWR_SAMPLE_MS    10UL     // the INA226 produces a new averaged reading every 8.8 ms
 #define PWR_RETRY_MS     5000UL   // re-initialise this often if the INA226 stops answering
+#define PWR_FAIL_LIMIT   5        // consecutive failed reads before it counts as not answering
 
 // ---------------------------------------------------------------------------
-// Reporting (tower)
+// Reporting (TOWER)
 // ---------------------------------------------------------------------------
 #define SAMPLE_MS        5UL     // analog sampling: catches the peak of a 20 WPM dit
 #define REPORT_IDLE_MS   2000UL  // packet rate while the PA is quiet
 #define REPORT_ACTIVE_MS 500UL   // packet rate while the PA shows output
 #define ACTIVE_MV        150     // PA sense above this = "transmitting"
-#define TEMP_PERIOD_MS   2000UL  // DS18B20 conversion cadence
+#define TEMP_PERIOD_MS   2000UL  // DS18B20 conversion cadence (tower and PSU)
+
+// ---------------------------------------------------------------------------
+// Reporting (PSU). Both transmitters share channel 77, so the PSU node listens
+// and sends its $RS a moment after each tower $RT it hears, in the gap before
+// the tower's next packet (>= 500 ms away). With no tower heard, it sends on
+// its own every PSU_REPORT_MS.
+// ---------------------------------------------------------------------------
+#define PSU_SLOT_DELAY_MS 60UL    // after the end of a tower $RT
+#define PSU_MIN_GAP_MS    400UL   // never send more often than this
+#define PSU_REPORT_MS     2000UL  // free-running period when the tower is silent
+#define PSU_TOWER_LOST_MS 3500UL  // no tower $RT this long -> free-running

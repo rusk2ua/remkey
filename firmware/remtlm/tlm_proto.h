@@ -1,4 +1,4 @@
-// remtlm packet formats, shared by the tower and base roles (and the host tests).
+// remtlm packet formats, shared by the tower, psu and base roles (and the host tests).
 //
 // Readings, every 0.5-2 s:
 //   $RT,<seq>,<pa_pk_mv>,<pa_avg_mv>,<xv_pk_mv>,<lock>,<t1_c10>,<t2_c10>,<uptime_s>,<call>*HH
@@ -14,12 +14,24 @@
 //   uptime_s   tower Nano uptime in seconds (shows resets / brown-outs)
 //   call       station callsign, so every transmission is identified
 //
-// Supply monitor, sent just before the $RT with the same seq (same interval):
+// Optional tower-top supply monitor (PWR_ENABLE 1 on the tower), sent just before
+// the $RT with the same seq (same interval):
 //   $RP,<seq>,<v_avg_mv>,<v_min_mv>,<v_max_mv>,<i_avg_ma>,<i_min_ma>,<i_max_ma>,<ok>,<call>*HH
 //
 //   v_*_mv     supply voltage at the tower enclosure (INA226 bus voltage), mV
 //   i_*_ma     supply current through the shunt, mA (negative = shunt wired backwards)
 //   ok         1 = INA226 answered for the whole interval, 0 = not (values are 0)
+//
+// Tower-base supply box (PSU node: INA226 + shunt at the supply, one DS18B20), every
+// 0.5-2 s, slotted just after each tower $RT it hears:
+//   $RS,<seq>,<v_avg_mv>,<v_min_mv>,<v_max_mv>,<i_avg_ma>,<i_min_ma>,<i_max_ma>,<ok>,<t_c10>,<uptime_s>,<call>*HH
+//
+//   seq        PSU node's own counter 0..65535 (independent of the tower's)
+//   v_*_mv     supply output voltage (INA226 bus voltage, load side of the shunt), mV
+//   i_*_ma     current into the tower cable through the shunt, mA
+//   ok         1 = INA226 answered for the whole interval, 0 = not (V/I values are 0)
+//   t_c10      box temperature in 0.1 C (TLM_TEMP_NONE if absent)
+//   uptime_s   PSU Nano uptime in seconds
 //
 // Transverter serial replies (Kuhne "s" status / "v" version), relayed verbatim:
 //   $RK,<id>,<cmd>,<part>,<total>,<text>,<call>*HH
@@ -38,7 +50,7 @@
 #include <string.h>
 
 #define TLM_TEMP_NONE (-32768)
-#define TLM_MAX_LINE  80
+#define TLM_MAX_LINE  96      // worst-case $RS is 80 bytes with CR/LF
 #define TLM_RK_TEXT   48      // reply text per $RK packet
 #define TLM_RK_LINE   (TLM_RK_TEXT + 40)
 
@@ -47,6 +59,16 @@ struct PwrData {
   uint16_t vAvgMv, vMinMv, vMaxMv;
   int32_t  iAvgMa, iMinMa, iMaxMa;
   uint8_t  ok;
+  const char *call;
+};
+
+struct SupData {
+  uint16_t seq;
+  uint16_t vAvgMv, vMinMv, vMaxMv;
+  int32_t  iAvgMa, iMinMa, iMaxMa;
+  uint8_t  ok;
+  int16_t  tC10;
+  uint32_t uptimeS;
   const char *call;
 };
 
@@ -96,6 +118,16 @@ static inline int tlmFormatPower(char *buf, size_t len, const PwrData *d) {
   return tlmSeal(buf, len, n);
 }
 
+// Writes a complete $RS line including "\r\n". Returns its length, or 0.
+static inline int tlmFormatSupply(char *buf, size_t len, const SupData *d) {
+  int n = snprintf(buf, len, "$RS,%u,%u,%u,%u,%ld,%ld,%ld,%u,%d,%lu,%s",
+                   (unsigned)d->seq, (unsigned)d->vAvgMv, (unsigned)d->vMinMv,
+                   (unsigned)d->vMaxMv, (long)d->iAvgMa, (long)d->iMinMa, (long)d->iMaxMa,
+                   (unsigned)d->ok, (int)d->tC10, (unsigned long)d->uptimeS, d->call);
+  if (n <= 0 || (size_t)n >= len) return 0;
+  return tlmSeal(buf, len, n);
+}
+
 // Writes one $RK line for text[0..textLen). Text must already be sanitised.
 static inline int tlmFormatReply(char *buf, size_t len, uint8_t id, char cmd, uint8_t part,
                                  uint8_t total, const char *text, size_t textLen,
@@ -124,12 +156,12 @@ static inline int tlmHexNibble(char c) {
   return -1;
 }
 
-// True if line (without CR/LF) is "$RT,...*HH" or "$RK,...*HH" with a correct checksum.
+// True if line (without CR/LF) is a $RT, $RP, $RS or $RK packet with a correct checksum.
 static inline bool tlmValid(const char *line) {
   size_t n = strlen(line);
   if (n < 8 || line[0] != '$') return false;
   if (strncmp(line, "$RT,", 4) != 0 && strncmp(line, "$RK,", 4) != 0 &&
-      strncmp(line, "$RP,", 4) != 0) return false;
+      strncmp(line, "$RP,", 4) != 0 && strncmp(line, "$RS,", 4) != 0) return false;
   if (line[n - 3] != '*') return false;
   int hi = tlmHexNibble(line[n - 2]), lo = tlmHexNibble(line[n - 1]);
   if (hi < 0 || lo < 0) return false;

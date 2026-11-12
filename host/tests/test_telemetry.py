@@ -24,6 +24,7 @@ from remkey.telemetry import (
     format_packet,
     format_power,
     format_reply,
+    format_supply,
     gauge_match,
     loop_resistance,
     parse_any,
@@ -85,6 +86,10 @@ def test_firmware_packets_parse(tmp_path):
     pw = [parse_any(ln) for ln in out.stdout.splitlines() if ln.startswith("$RP")]
     assert pw[0] == PowerPacket(42, 13.284, 12.851, 13.402, 4.012, 3.9, 6.104, True, "K2UA")
     assert (pw[1].i_avg, pw[1].i_min, pw[1].i_max) == (-0.512, -40.96, 40.959)
+    sb = [parse_any(ln) for ln in out.stdout.splitlines() if ln.startswith("$RS")]
+    assert sb[0] == PowerPacket(77, 14.012, 13.89, 14.105, 1.066, 0.412, 5.98, True, "K2UA",
+                                "base", 21.4, 3600)
+    assert sb[1].ok is False and sb[1].temp_c is None and sb[1].uptime_s == 12
     a = ReplyAssembler()
     done = None
     for ln in out.stdout.splitlines():
@@ -176,7 +181,8 @@ async def test_station_forwards_and_alerts(station_tlm):
 
     rows = (tmp / "tlm.csv").read_text().splitlines()
     assert rows[0].startswith("time,seq") and len(rows) == 3
-    assert rows[0].endswith("temp1_c,temp2_c,uptime_s,v_avg,v_min,v_max,i_avg,i_min,i_max")
+    assert rows[0].endswith("temp1_c,temp2_c,uptime_s,supply_at,box_temp_c,top_v_avg,"
+                            "v_avg,v_min,v_max,i_avg,i_min,i_max")
     writer.close()
 
 
@@ -369,3 +375,158 @@ def test_powerstats_on_synthetic_log(tmp_path, capsys):
     assert s["v_max_alert"] == 14.3
     assert 3.1 <= s["i_min_alert"] <= 3.3
     assert s["v_min_alert"] < 12.0 and "below the MKU" in out  # 12.07 V lowest - 0.3
+
+
+# ----------------------------------------------------------------- tower-base supply box ($RS)
+def box(seq=1, v=14.0, vmin=None, i=4.0, imax=None, ok=True, temp=20.0, up=100):
+    return format_supply(PowerPacket(seq, v, vmin if vmin is not None else v, v,
+                                     i, i, imax if imax is not None else i, ok, "K2UA",
+                                     "base", temp, up))
+
+
+def test_supply_box_packet_roundtrip():
+    p = parse_any(box(seq=7, v=14.012, vmin=13.9, i=1.066, imax=5.98, temp=-4.5, up=3600))
+    assert isinstance(p, PowerPacket) and p.src == "base"
+    assert (p.seq, p.v_avg, p.v_min, p.i_max, p.temp_c, p.uptime_s) == (7, 14.012, 13.9, 5.98, -4.5, 3600)
+    assert parse_any(box(temp=None)).temp_c is None
+    assert parse_any(pwr()).src == "top"                     # $RP is still the top box
+    line = box()
+    assert parse_any(line[:5] + "9" + line[6:]) is None      # checksum
+    assert parse_any("$RS,1,2,3*00") is None
+    # scaling keeps the box fields
+    q = p.scaled(1.01, 0.5)
+    assert q.src == "base" and q.temp_c == -4.5 and q.uptime_s == 3600 and q.i_max == pytest.approx(2.99)
+
+
+def test_link_stats_work_for_the_box():
+    st = LinkStats()
+    for seq, up in ((1, 10), (2, 12), (5, 18), (0, 1)):     # two lost, then a reset
+        st.update(parse_any(box(seq=seq, up=up)), now=float(seq))
+    assert st.received == 4 and st.lost == 2 and st.resets == 1
+
+
+async def test_station_supply_box_only_then_with_top(tmp_path):
+    cfg = StationConfig(secret=SECRET, listen_host="127.0.0.1", listen_port=0, log_file="",
+                        tlm_csv=str(tmp_path / "tlm.csv"), tlm_stale_s=60, base_supply_v=14.1,
+                        v_min_alert=13.0, i_max_alert=7.0, box_temp_warn_c=45.0)
+    link, tlink = FakeLink(), FakeLink()
+    svc = StationService(cfg, link, tlink)
+    await svc.start()
+    try:
+        reader, writer, _ = await raw_connect(svc.port)
+        await reader.readline()                               # state
+
+        async def next_of(t, pred=lambda m: True):
+            while True:
+                m = P.decode(await asyncio.wait_for(reader.readline(), 2))
+                if m["t"] == t and pred(m):
+                    return m
+
+        # base box alone (top box not built yet): its own link-up, supply at the base, no drop
+        tlink.inject(box(seq=1, v=14.05, i=1.1, temp=21.5))
+        assert "supply box link up" in (await next_of("alert"))["msg"]
+        m = await next_of("pwr")
+        assert m["at"] == "base" and m["base_v"] == pytest.approx(14.05)
+        assert m["drop_v"] is None and m["top_v"] is None and m["box_temp_c"] == 21.5
+        # the tower is silent, so the box logs its own rows
+        row = (tmp_path / "tlm.csv").read_text().splitlines()[1].split(",")
+        assert row[1] == "1" and row[2] == "" and row[11:14] == ["base", "21.5", ""]
+        assert row[-6:] == ["14.050", "14.050", "14.050", "1.100", "1.100", "1.100"]
+
+        # alerts from the box: low voltage at the base, high current, hot box, INA226 gone
+        tlink.inject(box(seq=2, v=13.2, vmin=12.8, i=5.0, imax=7.4, temp=47.0))
+        msgs = [(await next_of("alert"))["msg"] for _ in range(3)]
+        assert any("supply box HOT: 47.0 C" in x for x in msgs)
+        assert any("supply at tower base LOW: 12.80 V" in x for x in msgs)
+        assert any("tower current HIGH: 7.40 A" in x for x in msgs)
+        tlink.inject(box(seq=3, ok=False, temp=40.0))
+        msgs = [(await next_of("alert"))["msg"] for _ in range(2)]
+        assert any("back to 40.0 C" in x for x in msgs)
+        assert any("tower-base supply monitor (INA226) not answering" in x for x in msgs)
+
+        # pwrq with only the base box: no cable fit possible
+        tlink.inject(box(seq=4, v=14.0, i=1.0))
+        assert "answering again" in (await next_of("alert"))["msg"]
+        writer.write(P.encode({"t": "pwrq"}))
+        await writer.drain()
+        m = await next_of("pwr", lambda m: m.get("query"))
+        assert m["fit"] is None and m["fit_possible"] is False
+
+        # top box comes up with its own INA226 ($RP + $RT): measured drop, CSV carries both
+        tlink.inject(pwr(seq=50, v=13.2, i=4.0))
+        tlink.inject(pkt(seq=50))
+        tlink.inject(box(seq=5, v=14.0, i=4.0))
+        m = await next_of("pwr", lambda m: m.get("top_v") is not None)
+        assert m["at"] == "base" and m["drop_v"] == pytest.approx(0.8)
+        tlink.inject(pwr(seq=51, v=13.2, i=4.0))
+        tlink.inject(pkt(seq=51))
+        await next_of("tlm", lambda m: m["seq"] == 51)
+        last = (tmp_path / "tlm.csv").read_text().splitlines()[-1].split(",")
+        assert last[1] == "51" and last[11:14] == ["base", "20.0", "13.200"]
+        assert last[-6:-3] == ["14.000", "14.000", "14.000"]
+        writer.close()
+    finally:
+        await svc.stop()
+
+
+async def test_box_stale_alert_is_separate(tmp_path):
+    cfg = StationConfig(secret=SECRET, listen_host="127.0.0.1", listen_port=0, log_file="",
+                        tlm_csv="", tlm_stale_s=0.5)
+    link, tlink = FakeLink(), FakeLink()
+    svc = StationService(cfg, link, tlink)
+    await svc.start()
+    try:
+        reader, writer, _ = await raw_connect(svc.port)
+        await reader.readline()
+        tlink.inject(box(seq=1))
+        seen = []
+        while not any("supply box lost" in x for x in seen):
+            m = P.decode(await asyncio.wait_for(reader.readline(), 3))
+            if m["t"] == "alert":
+                seen.append(m["msg"])
+        assert not any("tower telemetry lost" in x for x in seen)   # tower never came up
+        writer.close()
+    finally:
+        await svc.stop()
+
+
+async def test_client_shows_base_supply(station_tlm):
+    svc, slink, tlink, _ = station_tlm
+    ccfg = ClientConfig(secret=SECRET, station_host="127.0.0.1", station_port=svc.port,
+                        reconnect_s=0.1, heartbeat_s=0.1)
+    out = NullOut()
+    app = ClientApp(ccfg, FakeLink(), Console(out))
+    task = asyncio.create_task(app.run())
+    await wait_for(lambda: app.connected)
+
+    app.on_key("\x14")                                       # PTT on
+    await wait_for(lambda: app.station_ptt)
+    tlink.inject(box(seq=1, v=14.0, vmin=13.85, i=5.0, imax=6.1, temp=22.0))
+    await wait_for(lambda: app.pwr and app.pwr.get("at") == "base")
+    app.on_key("\x14")                                       # PTT off
+    await wait_for(lambda: "supply min 13.85 V, peak 6.10 A" in out.text)
+
+    app.on_key("\x16")                                       # Ctrl-V
+    await wait_for(lambda: "supply at tower base: 14.00 V (min 13.85)" in out.text)
+    await wait_for(lambda: "needs a supply monitor in the tower-top box" in out.text)
+    assert "supply box 22.0 C" in out.text
+    app.quit.set()
+    await asyncio.wait_for(task, 3)
+
+
+def test_powerstats_base_box_only(tmp_path, capsys):
+    from remkey import powerstats
+
+    path = tmp_path / "tlm.csv"
+    log = CsvLog(str(path))
+    for seq in range(100):
+        tx = seq % 4 == 0
+        i = 6.0 if tx else 1.0
+        p = Packet(seq, 2500 if tx else 20, 1200 if tx else 10, 0, True, 30.0, 25.0, seq, "K2UA")
+        sup = PowerPacket(seq, 14.0, 13.95, 14.02, i, i, i, True, "K2UA", "base", 20.0, seq)
+        log.write(p, None, None, sup)
+    assert powerstats.main([str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "RECEIVE: 75 intervals" in out and "TRANSMIT: 25 intervals" in out
+    assert "at the supply box (tower base)" in out
+    assert "needs the tower-top voltage" in out

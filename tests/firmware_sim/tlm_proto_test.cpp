@@ -30,6 +30,22 @@ int main() {
     if (!tlmValid(chk)) { fails++; std::printf("FAIL power valid\n"); }
   }
 
+  // tower-base supply box packet: normal, then the worst case that must still fit
+  SupData sd = {77, 14012, 13890, 14105, 1066, 412, 5980, 1, 214, 3600, "K2UA"};
+  if (tlmFormatSupply(buf, sizeof(buf), &sd) <= 0) { fails++; std::printf("FAIL supply format\n"); }
+  std::printf("%s", buf);
+  sd = {78, 0, 0, 0, 0, 0, 0, 0, TLM_TEMP_NONE, 12, "K2UA"};
+  tlmFormatSupply(buf, sizeof(buf), &sd);
+  std::printf("%s", buf);
+  {
+    SupData worst = {65535, 65535, 65535, 65535, -40960, -40960, -40960, 1, -32768, 4294967295UL, "K2UA"};
+    char big[TLM_MAX_LINE];
+    int m = tlmFormatSupply(big, sizeof(big), &worst);
+    if (m <= 0 || m > 80) { fails++; std::printf("FAIL worst-case supply length %d\n", m); }
+    big[strcspn(big, "\r\n")] = 0;
+    if (!tlmValid(big)) { fails++; std::printf("FAIL supply valid\n"); }
+  }
+
   // validator on its own output and on corrupted copies
   buf[strcspn(buf, "\r\n")] = 0;
   if (!tlmValid(buf)) { fails++; std::printf("FAIL valid\n"); }

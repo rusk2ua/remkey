@@ -4,9 +4,13 @@
     python -m remkey.powerstats remkey-tlm.csv --config station.toml --since 2026-11-01
 
 Rows are split into receive and transmit intervals by the PA power-sense peak
-(pa_pk_mv above --tx-mv counts as transmit). Run it after a few days of normal
-operating, including some transmitting, then copy the suggested limits into
-station.toml.
+(pa_pk_mv above --tx-mv counts as transmit; rows logged while the tower box was
+silent count as receive). Run it after a few days of normal operating, including
+some transmitting, then copy the suggested limits into station.toml.
+
+The cable fit needs the voltage at the top of the tower: a top-box INA226
+(remtlm PWR_ENABLE 1). With only the tower-base supply box, voltage and current
+are summarised but the cable resistance isn't estimated.
 """
 
 from __future__ import annotations
@@ -38,6 +42,10 @@ def summarise(rows: list[dict], tx_mv: float) -> dict:
             v["pa"] = float(r.get("pa_pk_mv") or 0)
         except (KeyError, ValueError):
             continue                       # no supply data in this row
+        at = r.get("supply_at") or "top"   # older logs: top-box INA226 only
+        v["at"] = at
+        top = r.get("top_v_avg") or (r["v_avg"] if at == "top" else "")
+        v["top_v"] = float(top) if top else None
         (tx if v["pa"] > tx_mv else rx).append(v)
     return {"rx": rx, "tx": tx}
 
@@ -97,16 +105,24 @@ def main(argv: list[str] | None = None) -> int:
 
     fit = CableFit(maxlen=10**7)
     for d in groups["rx"] + groups["tx"]:
-        fit.add(d["i_avg"], d["v_avg"])
+        if d["top_v"] is not None:
+            fit.add(d["i_avg"], d["top_v"])
     r = fit.result()
     print(file=out)
-    if r:
+    at_base = any(d["at"] == "base" for d in groups["rx"] + groups["tx"])
+    if at_base:
+        print("voltages above are at the supply box (tower base)", file=out)
+    if not fit.pts:
+        print("cable loop resistance: needs the tower-top voltage (remtlm PWR_ENABLE 1 in the top box)",
+              file=out)
+    elif r:
         awg, exp, verdict = gauge_match(r["r_ohm"], one_way_ft)
         print(f"cable loop resistance {r['r_ohm'] * 1000:.0f} mOhm (fit over {r['n']} intervals,"
               f" {r['i_lo']:.2f}-{r['i_hi']:.2f} A, rms {r['rms_mv']:.0f} mV)", file=out)
         print(f"  {verdict}; #{awg} copper would be {exp * 1000:.0f} mOhm for 2 x {one_way_ft:.0f} ft"
               " at 20 C (+0.39% per degree C)", file=out)
-        print(f"  supply holding {r['v_source']:.2f} V at the base (set to {base_v:.2f} V)", file=out)
+        print(f"  supply holding {r['v_source']:.2f} V at the base"
+              + ("" if at_base else f" (set to {base_v:.2f} V)"), file=out)
     else:
         print("cable loop resistance: not enough current spread yet (transmit more)", file=out)
 

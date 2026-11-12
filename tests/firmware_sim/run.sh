@@ -1,5 +1,7 @@
 #!/bin/sh
-# Build and run the firmware simulation for both roles and both keyer modes.
+# Build and run the firmware simulations:
+#   remkey: both roles, both keyer modes, both LED polarities
+#   remtlm: tower (with and without the top-box INA226), base and psu
 set -e
 cd "$(dirname "$0")"
 for role in 1 2; do
@@ -11,4 +13,10 @@ for role in 1 2; do
       ./sim_${role}_${mode}_${led}
     done
   done
+done
+for build in "1 0" "1 1" "2 0" "3 0"; do
+  set -- $build
+  g++ -std=c++17 -Wall -Wextra -Wno-unused-parameter -I. -Iremtlm_mocks -I../../firmware/remtlm \
+      -DREMTLM_ROLE=$1 -DPWR_ENABLE=$2 -x c++ remtlm_sim.cpp -o remtlm_sim_$1_$2
+  ./remtlm_sim_$1_$2
 done

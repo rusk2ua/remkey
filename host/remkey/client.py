@@ -157,6 +157,16 @@ class ClientApp:
 
     @staticmethod
     def pwr_line(m: dict) -> str:
+        if m.get("at") == "base":
+            parts = [f"supply at tower base: {m['v_avg']:.2f} V (min {m['v_min']:.2f})",
+                     f"{m['i_avg']:.2f} A (peak {m['i_max']:.2f})"]
+            if isinstance(m.get("top_v"), (int, float)):
+                parts.append(f"top {m['top_v']:.2f} V, cable drop {m['drop_v']:.2f} V")
+            if isinstance(m.get("box_temp_c"), (int, float)):
+                parts.append(f"{m.get('box_temp_name') or 'box'} {m['box_temp_c']:.1f} C")
+            if m.get("box_loss_pct"):
+                parts.append(f"link loss {m['box_loss_pct']}%")
+            return " | ".join(parts)
         return (f"tower supply: {m['v_avg']:.2f} V (min {m['v_min']:.2f}) | {m['i_avg']:.2f} A"
                 f" (peak {m['i_max']:.2f}) | {m['drop_v']:.2f} V below the {m['base_v']:.2f} V supply")
 
@@ -165,10 +175,15 @@ class ClientApp:
             self.console.event("no tower supply readings yet")
             return
         if not m.get("ok"):
-            self.console.event("tower supply monitor (INA226) is not answering")
+            where = "tower-base" if m.get("at") == "base" else "tower-top"
+            self.console.event(f"{where} supply monitor (INA226) is not answering")
             return
         self.console.event(self.pwr_line(m) + f" ({m.get('age_s')} s old)")
         fit = m.get("fit")
+        if not fit and not m.get("fit_possible", True):
+            self.console.event("   cable resistance: needs a supply monitor in the tower-top box too"
+                               " (remtlm PWR_ENABLE 1)")
+            return
         if not fit:
             n = m.get("fit_points", 0)
             self.console.event(f"   cable resistance: not enough data yet ({n} readings; needs 20+"
@@ -180,9 +195,10 @@ class ClientApp:
         self.console.event(
             f"   {fit['verdict']} ({fit['expected_r'] * 1000:.0f} mOhm for"
             f" 2 x {fit['one_way_ft']:.0f} ft at 20 C)")
+        where = "measured" if m.get("at") == "base" else "holding"
         self.console.event(
-            f"   supply holding {fit['v_source']:.2f} V at the base; cable drop is"
-            f" {fit['r_ohm'] * m['i_avg']:.2f} V now,"
+            f"   supply {where} {m['base_v'] if m.get('at') == 'base' else fit['v_source']:.2f} V"
+            f" at the base; cable drop is {fit['r_ohm'] * m['i_avg']:.2f} V now,"
             f" {fit['r_ohm'] * m['i_max']:.2f} V at {m['i_max']:.2f} A")
 
     @staticmethod

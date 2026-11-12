@@ -4,7 +4,7 @@
     python -m remkey.tlmview --port COM9 --config station.toml   with your calibration
 
 Stop the station service first (it owns the port), or point this at the tower
-Nano's own USB port on the bench: the tower prints every packet on USB too.
+or supply-box Nano's own USB port on the bench: each prints every packet it sends.
 """
 
 from __future__ import annotations
@@ -14,7 +14,16 @@ import sys
 import time
 
 from .config import load_station
-from .telemetry import Calibration, LinkStats, Packet, PowerPacket, ReplyAssembler, ReplyPart, parse_any
+from .telemetry import (
+    SRC_BASE,
+    Calibration,
+    LinkStats,
+    Packet,
+    PowerPacket,
+    ReplyAssembler,
+    ReplyPart,
+    parse_any,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         v_scale, i_scale = cfg.v_scale, cfg.i_scale
 
     stats = LinkStats()
+    box_stats = LinkStats()
     replies = ReplyAssembler()
     with serial.Serial(args.port, args.baud, timeout=1) as ser:
         print(f"listening on {args.port} (Ctrl-C to stop)")
@@ -55,13 +65,20 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"      {ln}")
                 continue
             if isinstance(p, PowerPacket):
+                base = p.src == SRC_BASE
+                where = "BASE supply" if base else "top supply "
+                extra = ""
+                if base:
+                    box_stats.update(p)
+                    temp = "n/a" if p.temp_c is None else f"{p.temp_c:.1f}"
+                    extra = f"  box {temp} C  up {p.uptime_s} s  loss {box_stats.loss_pct_5min():.1f}%"
                 if not p.ok:
-                    print(f"{time.strftime('%H:%M:%S')} #{p.seq:<5d} supply monitor NOT ANSWERING")
+                    print(f"{time.strftime('%H:%M:%S')} #{p.seq:<5d} {where} monitor NOT ANSWERING{extra}")
                     continue
                 q = p.scaled(v_scale, i_scale)
-                print(f"{time.strftime('%H:%M:%S')} #{q.seq:<5d} supply {q.v_avg:6.3f} V"
+                print(f"{time.strftime('%H:%M:%S')} #{q.seq:<5d} {where} {q.v_avg:6.3f} V"
                       f" (min {q.v_min:6.3f} max {q.v_max:6.3f})  {q.i_avg:6.3f} A"
-                      f" (min {q.i_min:6.3f} max {q.i_max:6.3f})")
+                      f" (min {q.i_min:6.3f} max {q.i_max:6.3f}){extra}")
                 continue
             if not isinstance(p, Packet):
                 if line:

@@ -13,6 +13,8 @@
 #define OUTPUT 1
 #define INPUT_PULLUP 2
 #define A0 14
+#define A1 15
+#define A2 16
 #define PROGMEM
 #define F(s) (s)
 #define memcpy_P memcpy

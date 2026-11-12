@@ -53,6 +53,8 @@ jobs:
           - { sketch: remkey, role: station, flag: REMKEY_ROLE=2 }
           - { sketch: remtlm, role: tower,   flag: REMTLM_ROLE=1 }
           - { sketch: remtlm, role: base,    flag: REMTLM_ROLE=2 }
+          - { sketch: remtlm, role: psu,     flag: REMTLM_ROLE=3 }
+          - { sketch: remtlm, role: tower-pwr, flag: "REMTLM_ROLE=1 -DPWR_ENABLE=1" }
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-arduino-cli@v2

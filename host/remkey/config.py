@@ -31,10 +31,12 @@ class StationConfig:
     temp_names: list = field(default_factory=lambda: ["PA heatsink", "transverter case"])
     tlm_stale_s: float = 10.0
     tlm_csv: str = "remkey-tlm.csv"
-    # --- tower supply monitor (INA226) ---
-    base_supply_v: float = 14.1      # what the supply at the tower base is set to
+    # --- supply monitor (INA226 in the tower-base supply box, and/or the top box) ---
+    base_supply_v: float = 14.1      # what the supply is set to (used when only the top box measures)
     cable_one_way_ft: float = 100.0  # tower base to tower top
-    v_scale: float = 1.0             # trim to a DMM reading at the enclosure
+    box_temp_name: str = "supply box"   # DS18B20 in the tower-base supply box
+    box_temp_warn_c: float = 50.0       # 0 = off
+    v_scale: float = 1.0             # trim to a DMM reading at the INA226
     i_scale: float = 1.0             # trim to a clamp meter / DMM in series
     v_min_alert: float = 12.0        # MKU 10 G5 minimum supply; 0 = off
     v_max_alert: float = 14.3        # 0 = off

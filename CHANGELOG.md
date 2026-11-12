@@ -3,6 +3,45 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-11
+
+### remtlm firmware 0.4.0: supply box at the tower base
+- New **PSU** role (`REMTLM_ROLE ROLE_PSU`, `pio run -e psu`) for a third Nano in
+  the supply box at the tower base: INA226 + shunt on the supply output (voltage
+  and current going up the tower, min / avg / max per interval) and one DS18B20
+  for the box temperature, sent as a new `$RS` packet with its own sequence
+  number and uptime. Same pins as the tower Nano for the E220, D5 and I2C.
+- Both senders share channel 77. The PSU node listens and sends its `$RS` ~60 ms
+  after each tower `$RT`, in the gap before the tower's next packet; with no
+  tower heard for 3.5 s it sends every 2 s on its own. It only touches the
+  DS18B20 bus right after its own packet, so the bus can't garble an incoming `$RT`.
+- TOWER: the INA226 is now optional and off by default (`PWR_ENABLE 0`). Turn it
+  on for a second INA226 at the top and a measured cable drop.
+- BASE: accepts `$RS`. **Reflash the base**: 0.3.0 rejects `$RS` as a bad packet.
+- INA226 reads are more robust next to SoftwareSerial (which holds interrupts off
+  ~1 ms per received byte and can time out an I2C read): the INA226 counts as
+  gone only after 5 failed reads in a row (`PWR_FAIL_LIMIT`), the PSU skips I2C
+  while the E220's AUX is low (a packet arriving), and the tower skips it during
+  an MKU serial poll.
+- `TLM_MAX_LINE` 80 → 96 (worst-case `$RS` is 80 bytes with CR/LF).
+- New host-side simulation of the sketch (`tests/firmware_sim/remtlm_sim.cpp`,
+  mocked E220 / OneWire / INA226), run for tower, tower with INA226, base and psu
+  by `tests/firmware_sim/run.sh`. CI also builds the psu and tower-with-INA226 images.
+
+### Host package 0.6.0
+- Parses `$RS`; separate link statistics, link-up and stale alerts for the
+  supply box (`tower-base supply box lost`), a box temperature alert
+  (`box_temp_name`, `box_temp_warn_c`), and voltage alerts labelled by where they
+  were measured (`at tower base` / `tower-top`).
+- Ctrl-V / the supply line show the base supply, box temperature and link loss;
+  with a top INA226 as well, the top voltage and the measured cable drop. The
+  cable-resistance fit uses only top-box voltage and says so when there is none.
+- CSV: new `supply_at`, `box_temp_c` and `top_v_avg` columns (an old file is
+  rotated aside automatically); supply-box rows are logged while the tower is silent.
+- `powerstats` fits the cable only on top-box voltage; `tlmview` shows `$RS` lines.
+- New schematic `docs/img/remtlm-psu-box-schematic.svg`; README section 9 and
+  the build plan (new phase 5S) cover the supply box.
+
 ## 2026-10-28
 
 ### Station launcher

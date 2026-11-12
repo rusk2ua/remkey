@@ -1,4 +1,4 @@
-// remtlm - tower-top telemetry for remkey over an Ebyte E220-900T22D LoRa link.
+// remtlm - tower telemetry for remkey over an Ebyte E220-900T22D LoRa link.
 //
 // TOWER role (Nano at the tower top, powered from the 13.8 V supply via a 5 V buck):
 //   - samples the PA power sense and the Kuhne MKU 10 G5 MON output every 5 ms,
@@ -6,22 +6,29 @@
 //   - watches the MKU's LD output (10 MHz reference lock); any unlock during an
 //     interval is reported
 //   - reads up to two DS18B20 probes (PA heatsink, transverter case)
-//   - reads an INA226 supply monitor every 10 ms: voltage at the enclosure and
-//     current through a high-side shunt (min / max / average per interval, sent
-//     as a $RP packet just before each $RT)
+//   - optional (PWR_ENABLE 1): an INA226 in the top box, voltage at the enclosure
+//     and current, sent as a $RP packet just before each $RT
 //   - sends a $RT packet every 2 s, every 0.5 s while the PA shows output, and
 //     immediately when lock changes
 //   - polls the MKU's serial port: "v" once after boot, then "s" every minute, and
 //     relays each reply verbatim as $RK packets. It never sends configuration commands.
 //
+// PSU role (Nano in the supply box at the tower base):
+//   - reads an INA226 every 10 ms: supply output voltage and current into the tower
+//     cable through a high-side shunt (min / max / average per interval)
+//   - reads one DS18B20 (box temperature)
+//   - listens on the LoRa channel and sends a $RS packet ~60 ms after each tower
+//     $RT, in the gap before the tower's next packet; with no tower heard for
+//     3.5 s it sends every 2 s on its own
+//
 // BASE role (Nano in the radio room, USB to the shack PC):
-//   - forwards every valid packet to USB serial, unchanged
+//   - forwards every valid packet (from the tower and the PSU box) to USB serial, unchanged
 //   - prints "V:..." at boot and "C:..." with the LoRa configuration result
 //
 // Libraries (Arduino Library Manager):
-//   "EByte LoRa E220 library" by Renzo Mischianti   (both roles)
-//   "OneWire" by Paul Stoffregen                     (tower)
-//   "DallasTemperature" by Miles Burton              (tower)
+//   "EByte LoRa E220 library" by Renzo Mischianti   (all roles)
+//   "OneWire" by Paul Stoffregen                     (tower, PSU)
+//   "DallasTemperature" by Miles Burton              (tower, PSU)
 
 #include "config.h"
 #include "tlm_proto.h"
@@ -31,19 +38,25 @@
 #define E220_22         // 22 dBm module family
 #include "LoRa_E220.h"
 
-#if REMTLM_ROLE == ROLE_TOWER
+#define HAS_SENSORS (REMTLM_ROLE == ROLE_TOWER || REMTLM_ROLE == ROLE_PSU)
+#define HAS_INA226  ((REMTLM_ROLE == ROLE_TOWER && PWR_ENABLE) || REMTLM_ROLE == ROLE_PSU)
+#define TEMP_PROBES (REMTLM_ROLE == ROLE_PSU ? 1 : 2)
+
+#if HAS_SENSORS
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#endif
+#if HAS_INA226
 #include <Wire.h>
 #endif
 
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.4.0"
 
 SoftwareSerial loraSerial(PIN_E220_TXD, PIN_E220_RXD);   // (rx, tx) from the Nano's side
 LoRa_E220 e220(&loraSerial, PIN_E220_AUX, PIN_E220_M0, PIN_E220_M1);
 
 // ---------------------------------------------------------------------------
-// LoRa module configuration (both roles)
+// LoRa module configuration (all roles)
 // ---------------------------------------------------------------------------
 static bool configureLora() {
   ResponseStructContainer c = e220.getConfiguration();
@@ -102,44 +115,19 @@ static bool configureLora() {
 
 static void printVersion() {
   Serial.print(F("V:remtlm " FW_VERSION " "));
-  Serial.println(REMTLM_ROLE == ROLE_TOWER ? F("tower") : F("base"));
-}
-
 #if REMTLM_ROLE == ROLE_TOWER
-// ===========================================================================
-// TOWER
-// ===========================================================================
-OneWire oneWire(PIN_ONEWIRE);
-DallasTemperature probes(&oneWire);
-#if XV_SERIAL_ENABLE
-SoftwareSerial xvSerial(PIN_XV_RX, PIN_XV_TX);
+  Serial.println(F("tower"));
+#elif REMTLM_ROLE == ROLE_PSU
+  Serial.println(F("psu"));
+#else
+  Serial.println(F("base"));
 #endif
-
-static uint16_t seq = 0;
-static uint16_t paPk = 0, xvPk = 0;
-static uint32_t paSum = 0;
-static uint16_t nSamples = 0;
-static bool lockAll = true;
-static bool lastLock = true;
-static int16_t tempC10[2] = {TLM_TEMP_NONE, TLM_TEMP_NONE};
-static uint8_t probeCount = 0;
-static bool tempPending = false;
-static uint32_t nextSample = 0, nextReport = 0, tempRequested = 0, nextTemp = 0;
-
-
-static uint16_t pinMv(uint8_t pin) {   // volts at the Nano pin
-  return (uint16_t)(((uint32_t)analogRead(pin) * VREF_MV) / 1023UL);
 }
 
-static uint16_t senseMv(uint8_t pin) { // volts at the source, before the divider
-  return (uint16_t)(((uint32_t)pinMv(pin) * DIVIDER_X1000) / 1000UL);
-}
-
-static bool refLocked() {
-  bool hi = pinMv(PIN_LO_LOCK) > LOCK_THRESHOLD_MV;
-  return LOCK_ACTIVE_HIGH ? hi : !hi;
-}
-
+#if HAS_SENSORS
+// ===========================================================================
+// Shared by TOWER and PSU: LoRa transmit, DS18B20 probes
+// ===========================================================================
 // Wait (briefly) until the E220 can take more data, then send one line.
 static void loraSend(const char *buf, int n) {
   uint32_t t0 = millis();
@@ -149,9 +137,48 @@ static void loraSend(const char *buf, int n) {
   digitalWrite(PIN_LED, !digitalRead(PIN_LED));
 }
 
-#if PWR_ENABLE
-// --- INA226 supply monitor ---------------------------------------------------
+OneWire oneWire(PIN_ONEWIRE);
+DallasTemperature probes(&oneWire);
+static int16_t tempC10[2] = {TLM_TEMP_NONE, TLM_TEMP_NONE};
+static uint8_t probeCount = 0;
+static bool tempPending = false;
+static uint32_t tempRequested = 0, nextTemp = 0;
+
+static void tempSetup() {
+  probes.begin();
+  probeCount = probes.getDeviceCount();
+  probes.setResolution(12);
+  probes.setWaitForConversion(false);
+  Serial.print(F("I:temperature probes="));
+  Serial.println(probeCount);
+}
+
+static void serviceTemp(uint32_t now) {
+  if (!tempPending && (int32_t)(now - nextTemp) >= 0) {
+    probes.requestTemperatures();          // non-blocking (see setup)
+    tempRequested = now;
+    tempPending = true;
+    nextTemp = now + TEMP_PERIOD_MS;
+  }
+  if (tempPending && now - tempRequested >= 800) {   // 12-bit conversion is 750 ms
+    for (uint8_t i = 0; i < TEMP_PROBES; i++) {
+      float c = (i < probeCount) ? probes.getTempCByIndex(i) : DEVICE_DISCONNECTED_C;
+      tempC10[i] = (c <= DEVICE_DISCONNECTED_C + 1)
+                       ? TLM_TEMP_NONE
+                       : (int16_t)(c * 10.0f + (c >= 0 ? 0.5f : -0.5f));
+    }
+    tempPending = false;
+  }
+}
+
+#endif
+
+#if HAS_INA226
+// ===========================================================================
+// INA226 supply monitor (TOWER with PWR_ENABLE, and PSU)
+// ===========================================================================
 static bool pwrUp = false, pwrOkAll = false;
+static uint8_t pwrFails = 0;
 static uint32_t pwrNext = 0, pwrRetry = 0;
 static uint32_t pwrVSum = 0;
 static int32_t pwrISum = 0, pwrIMin = 0, pwrIMax = 0;
@@ -204,11 +231,17 @@ static void servicePower(uint32_t now) {
   pwrNext = now + PWR_SAMPLE_MS;
   uint16_t rawSh, rawBus;
   if (!inaRead(0x01, &rawSh) || !inaRead(0x02, &rawBus)) {
-    pwrUp = false;
-    pwrOkAll = false;
-    pwrRetry = now + PWR_RETRY_MS;
+    // A SoftwareSerial byte arriving holds interrupts off for ~1 ms, which can
+    // time out one I2C read. Only a run of failures means the INA226 is gone.
+    if (++pwrFails >= PWR_FAIL_LIMIT) {
+      pwrFails = 0;
+      pwrUp = false;
+      pwrOkAll = false;
+      pwrRetry = now + PWR_RETRY_MS;
+    }
     return;
   }
+  pwrFails = 0;
   uint16_t vMv = (uint16_t)(((uint32_t)rawBus * 125UL) / 100UL);     // 1.25 mV LSB
   int32_t iMa = ((int32_t)(int16_t)rawSh * 2500L) / SHUNT_UOHM;       // 2.5 uV LSB
   if (pwrN == 0) {
@@ -225,22 +258,120 @@ static void servicePower(uint32_t now) {
   pwrN++;
 }
 
+struct PwrStats {
+  uint16_t vAvgMv, vMinMv, vMaxMv;
+  int32_t  iAvgMa, iMinMa, iMaxMa;
+  uint8_t  ok;
+};
+
+// Min / max / average since the last call, then start a new interval.
+static PwrStats pwrTake() {
+  PwrStats p;
+  bool ok = pwrOkAll && pwrN > 0;
+  p.vAvgMv = ok ? (uint16_t)(pwrVSum / pwrN) : 0;
+  p.vMinMv = ok ? pwrVMin : 0;
+  p.vMaxMv = ok ? pwrVMax : 0;
+  p.iAvgMa = ok ? pwrISum / (int32_t)pwrN : 0;
+  p.iMinMa = ok ? pwrIMin : 0;
+  p.iMaxMa = ok ? pwrIMax : 0;
+  p.ok = ok ? 1 : 0;
+  pwrResetInterval();
+  return p;
+}
+
+static void pwrSetup() {
+  Wire.begin();
+  Wire.setClock(100000);
+  Wire.setWireTimeout(3000, true);   // never hang on a bad I2C bus
+  pwrUp = inaInit();
+  Serial.println(pwrUp ? F("I:INA226 ok") : F("I:INA226 not found"));
+  pwrRetry = millis() + PWR_RETRY_MS;
+  pwrResetInterval();
+}
+#endif
+
+#if REMTLM_ROLE != ROLE_TOWER
+// ===========================================================================
+// LoRa line receiver (PSU and BASE). Returns a complete, checksum-valid line
+// (without CR/LF) or nullptr. Counts bad packets in rxBad.
+// ===========================================================================
+static char rxLine[TLM_RK_LINE + 8];
+static uint8_t rxLen = 0;
+static uint16_t rxBad = 0;
+
+static const char *loraReadLine() {
+  while (loraSerial.available() > 0) {
+    char c = (char)loraSerial.read();
+    if (c == '\r') continue;
+    if (c == '$') {                // start of packet: resync
+      rxLen = 0;
+      rxLine[rxLen++] = c;
+      continue;
+    }
+    if (rxLen == 0) continue;      // noise between packets
+    if (c == '\n') {
+      rxLine[rxLen] = 0;
+      rxLen = 0;
+      if (tlmValid(rxLine)) return rxLine;
+      rxBad++;
+      return nullptr;
+    }
+    if (rxLen < sizeof(rxLine) - 1) {
+      rxLine[rxLen++] = c;
+    } else {
+      rxLen = 0;                   // overlong: drop and wait for the next '$'
+    }
+  }
+  return nullptr;
+}
+#endif
+
+#if REMTLM_ROLE == ROLE_TOWER
+// ===========================================================================
+// TOWER
+// ===========================================================================
+#if XV_SERIAL_ENABLE
+SoftwareSerial xvSerial(PIN_XV_RX, PIN_XV_TX);
+#endif
+
+static uint16_t seq = 0;
+static uint16_t paPk = 0, xvPk = 0;
+static uint32_t paSum = 0;
+static uint16_t nSamples = 0;
+static bool lockAll = true;
+static bool lastLock = true;
+static uint32_t nextSample = 0, nextReport = 0;
+
+
+static uint16_t pinMv(uint8_t pin) {   // volts at the Nano pin
+  return (uint16_t)(((uint32_t)analogRead(pin) * VREF_MV) / 1023UL);
+}
+
+static uint16_t senseMv(uint8_t pin) { // volts at the source, before the divider
+  return (uint16_t)(((uint32_t)pinMv(pin) * DIVIDER_X1000) / 1000UL);
+}
+
+static bool refLocked() {
+  bool hi = pinMv(PIN_LO_LOCK) > LOCK_THRESHOLD_MV;
+  return LOCK_ACTIVE_HIGH ? hi : !hi;
+}
+
+#if PWR_ENABLE
 static void sendPower(uint16_t seqForPacket) {
   char buf[TLM_MAX_LINE];
+  PwrStats p = pwrTake();
   PwrData d;
-  bool ok = pwrOkAll && pwrN > 0;
   d.seq = seqForPacket;
-  d.vAvgMv = ok ? (uint16_t)(pwrVSum / pwrN) : 0;
-  d.vMinMv = ok ? pwrVMin : 0;
-  d.vMaxMv = ok ? pwrVMax : 0;
-  d.iAvgMa = ok ? pwrISum / (int32_t)pwrN : 0;
-  d.iMinMa = ok ? pwrIMin : 0;
-  d.iMaxMa = ok ? pwrIMax : 0;
-  d.ok = ok ? 1 : 0;
+  d.vAvgMv = p.vAvgMv;
+  d.vMinMv = p.vMinMv;
+  d.vMaxMv = p.vMaxMv;
+  d.iAvgMa = p.iAvgMa;
+  d.iMinMa = p.iMinMa;
+  d.iMaxMa = p.iMaxMa;
+  d.ok = p.ok;
   d.call = CALLSIGN;
   int n = tlmFormatPower(buf, sizeof(buf), &d);
   if (n > 0) loraSend(buf, n);
-  pwrResetInterval();
 }
 #endif
 
@@ -265,24 +396,6 @@ static void sendReport() {
   paSum = 0;
   nSamples = 0;
   lockAll = refLocked();
-}
-
-static void serviceTemp(uint32_t now) {
-  if (!tempPending && (int32_t)(now - nextTemp) >= 0) {
-    probes.requestTemperatures();          // non-blocking (see setup)
-    tempRequested = now;
-    tempPending = true;
-    nextTemp = now + TEMP_PERIOD_MS;
-  }
-  if (tempPending && now - tempRequested >= 800) {   // 12-bit conversion is 750 ms
-    for (uint8_t i = 0; i < 2; i++) {
-      float c = (i < probeCount) ? probes.getTempCByIndex(i) : DEVICE_DISCONNECTED_C;
-      tempC10[i] = (c <= DEVICE_DISCONNECTED_C + 1)
-                       ? TLM_TEMP_NONE
-                       : (int16_t)(c * 10.0f + (c >= 0 ? 0.5f : -0.5f));
-    }
-    tempPending = false;
-  }
 }
 
 #if XV_SERIAL_ENABLE
@@ -357,20 +470,9 @@ void setup() {
   printVersion();
   e220.begin();
   configureLora();
-  probes.begin();
-  probeCount = probes.getDeviceCount();
-  probes.setResolution(12);
-  probes.setWaitForConversion(false);
-  Serial.print(F("I:temperature probes="));
-  Serial.println(probeCount);
+  tempSetup();
 #if PWR_ENABLE
-  Wire.begin();
-  Wire.setClock(100000);
-  Wire.setWireTimeout(3000, true);   // never hang the tower on a bad I2C bus
-  pwrUp = inaInit();
-  Serial.println(pwrUp ? F("I:INA226 ok") : F("I:INA226 not found"));
-  pwrRetry = millis() + PWR_RETRY_MS;
-  pwrResetInterval();
+  pwrSetup();
 #endif
 #if XV_SERIAL_ENABLE
   xvSerial.begin(XV_BAUD);
@@ -400,7 +502,9 @@ void loop() {
     }
   }
   serviceTemp(now);
-#if PWR_ENABLE
+#if PWR_ENABLE && XV_SERIAL_ENABLE
+  if (!xvWaiting) servicePower(now);   // no I2C while a transverter reply may be arriving
+#elif PWR_ENABLE
   servicePower(now);
 #endif
 #if XV_SERIAL_ENABLE
@@ -413,14 +517,87 @@ void loop() {
   }
 }
 
+#elif REMTLM_ROLE == ROLE_PSU
+// ===========================================================================
+// PSU (supply box at the tower base)
+// ===========================================================================
+static uint16_t seq = 0;
+static bool towerHeard = false;
+static bool slotPending = false;
+static uint32_t towerAt = 0, slotAt = 0, lastSend = 0;
+
+static void sendSupply(uint32_t now) {
+  char buf[TLM_MAX_LINE];
+  PwrStats p = pwrTake();
+  SupData d;
+  d.seq = seq++;
+  d.vAvgMv = p.vAvgMv;
+  d.vMinMv = p.vMinMv;
+  d.vMaxMv = p.vMaxMv;
+  d.iAvgMa = p.iAvgMa;
+  d.iMinMa = p.iMinMa;
+  d.iMaxMa = p.iMaxMa;
+  d.ok = p.ok;
+  d.tC10 = tempC10[0];
+  d.uptimeS = now / 1000UL;
+  d.call = CALLSIGN;
+  int n = tlmFormatSupply(buf, sizeof(buf), &d);
+  if (n > 0) loraSend(buf, n);
+  lastSend = now;
+}
+
+void setup() {
+  pinMode(PIN_LED, OUTPUT);
+  Serial.begin(115200);
+  printVersion();
+  e220.begin();
+  configureLora();
+  tempSetup();
+  pwrSetup();
+  lastSend = millis();
+}
+
+void loop() {
+  uint32_t now = millis();
+  // AUX goes low a few ms before the E220 passes a received packet to the Nano,
+  // and stays low until it's done: no I2C while those bytes arrive.
+  if (digitalRead(PIN_E220_AUX) == HIGH) servicePower(now);
+
+  const char *ln = loraReadLine();
+  if (ln && strncmp(ln, "$RT,", 4) == 0) {      // tower readings just ended: our slot follows
+    if (!towerHeard) Serial.println(F("I:tower heard, sending in its gaps"));
+    towerHeard = true;
+    towerAt = now;
+    slotPending = true;
+    slotAt = now + PSU_SLOT_DELAY_MS;
+  }
+  if (towerHeard && now - towerAt >= PSU_TOWER_LOST_MS) {
+    towerHeard = false;
+    slotPending = false;
+    Serial.println(F("I:tower not heard, sending on own timer"));
+  }
+
+  bool sent = false;
+  if (slotPending && (int32_t)(now - slotAt) >= 0) {
+    slotPending = false;
+    if (now - lastSend >= PSU_MIN_GAP_MS) {
+      sendSupply(now);
+      sent = true;
+    }
+  } else if (!towerHeard && now - lastSend >= PSU_REPORT_MS) {
+    sendSupply(now);
+    sent = true;
+  }
+  // The DS18B20 bus briefly blocks interrupts, which can garble a byte arriving
+  // on the LoRa SoftwareSerial. Touch it only right after our own packet, when
+  // the tower's next one is still >= 400 ms away (or the tower isn't there).
+  if (sent || !towerHeard) serviceTemp(now);
+}
+
 #else
 // ===========================================================================
 // BASE
 // ===========================================================================
-static char line[TLM_RK_LINE + 8];
-static uint8_t lineLen = 0;
-static uint16_t badCount = 0;
-
 void setup() {
   pinMode(PIN_LED, OUTPUT);
   Serial.begin(115200);
@@ -430,31 +607,16 @@ void setup() {
 }
 
 void loop() {
-  while (loraSerial.available() > 0) {
-    char c = (char)loraSerial.read();
-    if (c == '\r') continue;
-    if (c == '$') {                // start of packet: resync
-      lineLen = 0;
-      line[lineLen++] = c;
-      continue;
-    }
-    if (lineLen == 0) continue;    // noise between packets
-    if (c == '\n') {
-      line[lineLen] = 0;
-      if (tlmValid(line)) {
-        Serial.println(line);
-        digitalWrite(PIN_LED, !digitalRead(PIN_LED));
-      } else {
-        badCount++;
-        Serial.print(F("E:bad packet #"));
-        Serial.println(badCount);
-      }
-      lineLen = 0;
-    } else if (lineLen < sizeof(line) - 1) {
-      line[lineLen++] = c;
-    } else {
-      lineLen = 0;                 // overlong: drop and wait for the next '$'
-    }
+  static uint16_t badSeen = 0;
+  const char *ln = loraReadLine();
+  if (ln) {
+    Serial.println(ln);
+    digitalWrite(PIN_LED, !digitalRead(PIN_LED));
+  }
+  if (rxBad != badSeen) {
+    badSeen = rxBad;
+    Serial.print(F("E:bad packet #"));
+    Serial.println(rxBad);
   }
 }
 #endif

@@ -4,8 +4,9 @@ A phased path from parts on the bench to a hardened remote station. Each phase e
 with something working that can be tested on its own, and nothing touches the tower
 or goes on the air until the safety behaviour has been proven on the bench.
 
-The telemetry work (phases 5–7) needs no radio connection, so it can run in parallel
-with phases 1–4.
+The telemetry work (phases 5–7, and 5S for the supply box at the tower base) needs no
+radio connection, so it can run in parallel with phases 1–4. Phase 5S can go first:
+the supply box works on its own, before the tower-top box exists.
 
 Tick the boxes as you go (edit this file on GitHub, or locally and push).
 
@@ -22,8 +23,10 @@ The E220 modules usually ship from China and are the slowest item, so order earl
 - [ ] 1× BSS138 4-channel level shifter
 - [ ] 1× AMS1117-3.3 module
 - [ ] 1× MP1584 (or similar) 5 V buck module and a 1 A fuse
-- [ ] 1× INA226 module (e.g. CJMCU-226)
+- [ ] 1× INA226 module (e.g. CJMCU-226): supply box at the tower base
 - [x] 1× 20 A / 75 mV panel-meter shunt (3.75 mΩ): ordered
+- [ ] Supply box: 3rd Nano, 3rd E220 + antenna, 1× DS18B20, 5 V buck + 1 A fuse
+- [ ] Optional later: a 2nd INA226 + shunt for the tower-top box (measured cable drop)
 - [ ] Weatherproof box with cable glands
 - [ ] 4× Nanos, resistors (1 k, 2 k, 4.7 k, 10 k, 22 k, 100 k, 470 Ω), 100 nF and 100 µF caps (likely on hand)
 
@@ -106,6 +109,32 @@ the paddle at the radio, and N1MM+ is unaffected.
 
 ---
 
+## Phase 5S: Supply box at the tower base (can go first)
+
+The PSU Nano: INA226 and shunt on the supply output, one DS18B20, its own E220. See
+README section 9, "Wiring: supply box at the tower base".
+
+- [ ] Flash the BASE Nano with remtlm 0.4.0 or later (older base firmware rejects `$RS`)
+- [ ] Flash the PSU image (`REMTLM_ROLE ROLE_PSU`, or `pio run -e psu`)
+- [ ] Bench: PSU prints `C:ok ch=77 freq_khz=927125`, `I:temperature probes=1`, `I:INA226 ok`
+- [ ] INA226: remove the module's R100 (or set `SHUNT_UOHM 3614`)
+- [ ] Bench supply plus a load: `$RS` voltage matches a DMM, current matches a meter in series
+- [ ] Reverse-polarity check: current reads positive with the load on the IN- side
+- [ ] `tlmview` on the base Nano shows `BASE supply` lines every 2 s; box temperature sensible
+- [ ] In the box: shunt in the supply (+) output ahead of the tower cable, on standoffs, terminals covered; IN+ supply side
+- [ ] Box 5 V tapped on the supply side of the shunt (fuse → buck), not from VIN
+- [ ] Station service: `-- tower-base supply box link up`; Ctrl-V shows `supply at tower base: … V | … A | supply box … C`
+- [ ] Receive current at the base: ________ A at ________ V
+- [ ] Transmit current at the base: ________ A peak
+- [ ] `v_min_alert` set for the base voltage (e.g. 13.5) until a top INA226 exists
+- [ ] Unplug the PSU Nano: `!! tower-base supply box lost` after `tlm_stale_s`
+- [ ] Later, once the tower box is up: PSU prints `I:tower heard, sending in its gaps`; loss on both links stays near zero
+
+**Done when:** Ctrl-V shows the tower's supply voltage and current from the house, and the
+box's link loss stays near zero overnight.
+
+---
+
 ## Phase 5: remtlm on the bench (parallel with phases 1–4)
 
 - [x] Optional: check each E220 with the FT232 adapter (README section 9): `python -m remkey.e220 --port ... --write` reads back channel 77, 9.6 kbps, 17 dBm
@@ -118,11 +147,8 @@ the paddle at the radio, and N1MM+ is unaffected.
 - [ ] MKU on the bench: LD reads locked/unlocked correctly (or `LOCK_MONITOR 0` if no external 10 MHz reference)
 - [ ] MKU serial via the level shifter: `v` and `s` replies arrive (else set `XV_CMD_SUFFIX "\r"`)
 - [ ] Capture an `s` reply and send it over for parsing / serial reference-PLL alert
-- [ ] INA226: remove the module's R100 (or set `SHUNT_UOHM 3614`)
-- [ ] Shunt: heavy leads on the bolts, IN+ / IN- on the sense screws (IN+ supply side); shunt insulated from the enclosure
-- [ ] Tower prints `I:INA226 ok`; `tlmview` shows supply voltage and current
-- [ ] Bench supply plus a load (power resistor or the transverter): voltage matches a DMM, current matches a meter in series; set `v_scale` / `i_scale`
-- [ ] Reverse-polarity check: current reads positive with the load on the IN- side
+- [ ] Optional top-box INA226 (`PWR_ENABLE 1`): R100 removed, shunt wired and insulated, tower prints `I:INA226 ok`, readings match a DMM
+- [ ] With the supply box running too: its `$RS` packets follow each tower `$RT` (`tlmview`), no extra loss on either link
 
 **Done when:** `tlmview` shows sensible readings, both temperatures, lock state and the
 MKU's replies, with near-zero packet loss on the bench.
@@ -159,11 +185,11 @@ MKU's replies, with near-zero packet loss on the bench.
 - [ ] Range test through the block wall: packet loss over one hour: ________ %
 - [ ] Step `LORA_TX_POWER` down to the lowest setting with under ~1% loss: ________
 - [ ] Long carrier: heatsink and case temperatures noted; thresholds adjusted if needed
-- [ ] Shunt and INA226 at the enclosure entry, ahead of everything in the box
-- [ ] Ctrl-V: tower voltage at receive current: ________ V at ________ A
-- [ ] Ctrl-V after some transmitting: cable loop resistance ________ mΩ (#10 ≈ 200, #12 ≈ 318), supply holding ________ V at the base
-- [ ] Lowest tower voltage on transmit stays above 12.0 V (MKU rating): lowest seen ________ V
-- [ ] Alerts tested: unplug a probe, interrupt the 10 MHz reference, power-cycle the tower Nano, unplug the INA226
+- [ ] Optional top INA226: shunt at the enclosure entry, ahead of everything in the box
+- [ ] With the top INA226, Ctrl-V: top voltage at receive current ________ V at ________ A; measured cable drop ________ V
+- [ ] With the top INA226, after some transmitting: cable loop resistance ________ mΩ (#10 ≈ 200, #12 ≈ 318)
+- [ ] Lowest tower voltage on transmit stays above 12.0 V (MKU rating): lowest seen ________ V (estimated from the table without a top INA226)
+- [ ] Alerts tested: unplug a probe, interrupt the 10 MHz reference, power-cycle the tower Nano, unplug an INA226
 
 **Done when:** the link holds overnight with negligible loss, and alerts fire correctly.
 

@@ -32,6 +32,8 @@ log_file = "remkey-station.log"
 
 # ---------------------------------------------------------------------------
 # Tower telemetry (remtlm). Leave tlm_port empty to disable.
+# One receiver (the BASE Nano) hears both remtlm senders: the tower-top box
+# and the supply box at the tower base.
 # ---------------------------------------------------------------------------
 # COM port of the remtlm BASE Nano in the radio room
 tlm_port = ""
@@ -59,28 +61,37 @@ temp_names = ["PA heatsink", "transverter case"]
 temp_warn_c = 65.0
 temp2_warn_c = 50.0
 
-# Alert if no telemetry packet arrives for this long
+# Alert if no packet arrives for this long (tower-top box and supply box, separately)
 tlm_stale_s = 10.0
 
 # One row per packet, for heatsink-temperature history etc. Empty = off.
 tlm_csv = "remkey-tlm.csv"
 
 # ---------------------------------------------------------------------------
-# Tower supply monitor (INA226 in the transverter enclosure)
+# Supply monitor: INA226 + shunt in the supply box at the tower base (remtlm PSU
+# Nano), and optionally a second one in the tower-top box (PWR_ENABLE 1)
 # ---------------------------------------------------------------------------
-# What the supply at the tower base is set to; the drop is measured against it
+# What the supply is set to. Only used when the top box measures and the base
+# box doesn't; with the base box, the supply voltage is measured.
 base_supply_v = 14.1
 
 # One-way cable length, tower base to the enclosure (for the wire-gauge check)
 cable_one_way_ft = 100
 
-# Trim to a DMM at the enclosure / a clamp meter (measured / displayed)
+# DS18B20 in the supply box: name and alert threshold (clears 3 C below; 0 = off)
+box_temp_name = "supply box"
+box_temp_warn_c = 50.0
+
+# Trim to a DMM at the INA226 / a clamp meter (measured / displayed)
 v_scale = 1.0
 i_scale = 1.0
 
 # Alerts. 0 turns one off. Leave the current limits at 0 until you know what's
 # normal, then run:  python -m remkey.powerstats remkey-tlm.csv --config station.toml
-v_min_alert = 12.0     # MKU 10 G5 minimum supply rating
+# The voltage limits apply to each INA226 (labelled "at tower base" / "tower-top").
+# With only the base box, v_min_alert checks the supply's own output: 12.0 is the
+# MKU 10 G5's minimum at the top, so set it nearer 13.5 until a top INA226 exists.
+v_min_alert = 12.0
 v_max_alert = 14.3
 i_max_alert = 0.0      # peak current above this
 i_min_alert = 0.0      # average current below this (something in the box lost power)
