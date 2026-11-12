@@ -380,8 +380,8 @@ Every firmware image builds with no warnings in the project's own files (`arduin
 |---|---|---|
 | remkey client / station | 7.9 KB of 30 KB | 541 B of 2 KB |
 | remtlm tower with its own INA226 (`PWR_ENABLE 1`; 0.3.0 figures) | 18.8 KB | 1056 B |
-| remtlm base (0.3.0 figures) | 7.4 KB | 450 B |
-| remtlm tower (default), psu | 0.4.0: not yet measured; see the CI build log | |
+| remtlm psu | 17.5 KB | 832 B |
+| remtlm base | 7.8 KB | 458 B |
 
 Library versions used in CI: EByte LoRa E220 library 1.0.8, OneWire 2.3.8, DallasTemperature 4.0.6.
 
