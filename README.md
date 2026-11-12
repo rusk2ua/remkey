@@ -429,6 +429,20 @@ There is no conductor between the tower and the house, so the link adds no light
 
 **The transverter link is read-only.** The tower only ever sends `s` and `v`, which read status, never the configuration commands (`IR`/`IT`/`RR`/`RT`/`D1`–`D4`). A garbled byte can't retune the IF or change the sequencer.
 
+### Which Nano is which
+
+With remtlm, the station has up to five Nanos. Each is a separate board on its own USB port or in its own box; the remtlm base does **not** replace the remkey station Nano.
+
+| Nano | Where | Firmware | Connects to |
+|---|---|---|---|
+| remkey station | Shack PC (USB) | remkey, station role | `keyer_port` in `station.toml`, and the 7610 keying lines |
+| remtlm base | Shack PC (USB) | remtlm 0.4.0, base | `tlm_port` in `station.toml`, plus its own E220 |
+| remtlm psu | Supply box at the tower base | remtlm 0.4.0, psu | Its own E220, INA226, DS18B20 |
+| remtlm tower | Tower-top box | remtlm, tower | Its own E220, PA and MKU sense lines, probes |
+| remkey client | Travel end (Mac, USB) | remkey, client role | Paddle and PTT switch; the Mac client by USB |
+
+The station service opens both shack ports. The keying path and the telemetry path share no hardware, so a telemetry fault can't affect keying: unplugging the remtlm base only raises a "lost" alert.
+
 ### Frequency and legality
 
 - The link runs on **927.125 MHz** (E220-900T22D channel 77, set by `LORA_CHANNEL` in `firmware/remtlm/config.h`). That's the top of the US 902–928 MHz band and about 24 MHz clear of 902–903 weak-signal work.
