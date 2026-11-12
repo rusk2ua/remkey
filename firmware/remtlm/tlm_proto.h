@@ -62,6 +62,13 @@ struct PwrData {
   const char *call;
 };
 
+// One interval of INA226 readings (min / avg / max), before it goes into a $RP or $RS.
+struct PwrStats {
+  uint16_t vAvgMv, vMinMv, vMaxMv;
+  int32_t  iAvgMa, iMinMa, iMaxMa;
+  uint8_t  ok;
+};
+
 struct SupData {
   uint16_t seq;
   uint16_t vAvgMv, vMinMv, vMaxMv;

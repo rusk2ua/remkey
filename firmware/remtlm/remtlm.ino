@@ -258,13 +258,9 @@ static void servicePower(uint32_t now) {
   pwrN++;
 }
 
-struct PwrStats {
-  uint16_t vAvgMv, vMinMv, vMaxMv;
-  int32_t  iAvgMa, iMinMa, iMaxMa;
-  uint8_t  ok;
-};
-
 // Min / max / average since the last call, then start a new interval.
+// (PwrStats lives in tlm_proto.h: the Arduino IDE puts a prototype for every
+// function above the sketch's own code, so a return type defined here fails.)
 static PwrStats pwrTake() {
   PwrStats p;
   bool ok = pwrOkAll && pwrN > 0;
