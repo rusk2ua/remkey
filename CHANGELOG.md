@@ -3,6 +3,25 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-13
+
+### Host package 0.7.0: web dashboard
+- The station service can serve a live telemetry page (`dash_port = 8080` in
+  `station.toml`) for another computer, tablet or phone on the home network or
+  Tailscale: supply box and tower-top readings, transverter status, history
+  charts (15 min to 12 h, reloaded from `remkey-tlm.csv` after a restart) and the
+  alert log. Plain asyncio, HTTP and Server-Sent Events: no new dependencies,
+  and the page itself loads nothing from the internet.
+- Buttons: add a marker (to the station log, the alert list and the Mac client),
+  reset min/max and link counts, clear the alert list. Nothing on the page can
+  key the radio or reach the tower.
+- Answers only `dash_allow` addresses (default: private ranges and Tailscale),
+  only to IP or plain machine/`*.local`/`*.ts.net` host names (DNS-rebinding
+  guard), and takes button presses only with the page's own request header. If
+  the dashboard can't start, keying still comes up.
+- New module `host/remkey/dashboard.py`, page `host/remkey/web/dashboard.html`,
+  tests `host/tests/test_dashboard.py`; README section 9 "Web dashboard".
+
 ## 2026-11-11
 
 ### remtlm firmware 0.4.0: supply box at the tower base

@@ -60,6 +60,8 @@ host/remkey/telemetry.py       remtlm packet parsing, calibration, link statisti
 host/remkey/tlmview.py         bench viewer for calibrating the PA power sense
 host/remkey/powerstats.py      tower supply statistics from the CSV log; suggested alert limits
 host/remkey/e220.py            read or program an E220 LoRa module through a USB serial adapter
+host/remkey/dashboard.py       telemetry web dashboard served by the station service (section 9)
+host/remkey/web/dashboard.html the dashboard page (self-contained: no internet needed)
 host/*.example.toml            config templates
 host/tests/                    pytest: protocol, end-to-end over localhost, telemetry
 tests/firmware_sim/            g++ simulation of the sketch (timing, decoder, watchdog)
@@ -635,6 +637,48 @@ In `station.toml`, set `tlm_port` to the base Nano's COM port. Then:
   - supply box at or above `box_temp_warn_c`
 - **TX summary:** when you drop PTT, the client prints `last TX: PA peak … W | supply min … V, peak … A`.
 - **CSV log:** every reading is also logged to `remkey-tlm.csv`, which gives you temperature, voltage and current history: one row per top-box packet, or per supply-box packet while the top box is silent. `supply_at` says where the voltage was measured (`base` or `top`), and `top_v_avg` holds the top voltage when both boxes measure. The station log records each transverter reply.
+
+### Web dashboard
+
+The station service can also serve a live telemetry page, for a second computer, tablet or phone in the radio room. It runs on the shack PC itself, so there's no extra hardware, and everything goes over your existing WiFi: no Ethernet cable anywhere near the station.
+
+![Dashboard with demo data: supply box and tower-top cards, history charts and the alert log](docs/img/dashboard.png)
+
+*(Screenshot with simulated data.)*
+
+What it shows:
+
+- **Supply box** (tower base): voltage, current, interval min/max and peak, box temperature, INA226 state, link loss and uptime, plus min/max since you last reset them.
+- **Tower top**: PA peak and average power (W once `pa_cal` is set, mV before), MKU MON, 10 MHz reference lock, both probe temperatures, link loss. Until the top box exists this card just says it's waiting.
+- **Transverter status**: the MKU's latest `s` reply and its firmware version.
+- **History charts** (15 min to 12 h): supply voltage with its min–max band and alert lines, current (average and peak), all three temperatures, and PA output with reference-unlock periods shaded. Hover or tap a chart for exact values. After a restart the charts reload from `remkey-tlm.csv`.
+- **Alerts**: the same alerts the Mac client prints, newest first. **Beep** sounds on new warnings (per browser; click it once to allow sound).
+- The header shows each link's state, and whether a remote client is connected and PTT is on.
+
+The buttons are deliberately harmless: **Add marker** writes a note (e.g. "starting TX test") into the station log, the alert list and the Mac client; **Reset min/max** starts new min/max and link-loss counts; **Clear list** empties the dashboard's alert list (the station log keeps everything). **Nothing on the page can key the radio, change PTT or send anything to the tower**, and the remkey keying path doesn't depend on it: if the dashboard can't start (say the port is taken), the station logs an error and keying comes up as usual.
+
+**Turn it on** in `station.toml`, then restart the station service:
+
+```toml
+dash_port = 8080
+```
+
+The station log shows `dashboard on http://0.0.0.0:8080/`.
+
+**Allow it through Windows Firewall** (once, in an administrator Command Prompt on the shack PC). This opens the port to your home network and Tailscale only:
+
+```
+netsh advfirewall firewall add rule name="remkey dashboard" dir=in action=allow protocol=TCP localport=8080 remoteip=LocalSubnet,100.64.0.0/10
+```
+
+**Open it:**
+
+- On the home network: `http://<shack-pc-name>:8080`, e.g. `http://shackpc:8080`. If the name doesn't resolve, use the PC's IP address (`ipconfig` on the shack PC, the WiFi adapter's IPv4 address), e.g. `http://192.168.1.50:8080`. Bookmark it, or add it to the iPad home screen.
+- Over Tailscale from the road: `http://<shack-pc's Tailscale name>:8080`, or its `100.x.y.z` address. Tailscale encrypts the traffic.
+
+**Who can reach it.** The page answers only addresses in `dash_allow`, which defaults to private home-network ranges and Tailscale; anything else is dropped without a reply. It also only answers to an IP address or a plain machine name (`shackpc`, `shackpc.local`, `*.ts.net`) in the address bar; to use another name, list it in `dash_hostnames`. Those two checks, plus a header that only the page itself sends with its button presses, stop other websites from reaching it through your browser. The page has no password: anyone on your home WiFi can view it and press the three harmless buttons.
+
+**Settings** (in `station.toml`): `dash_port` (0 = off), `dash_host` (`0.0.0.0` = all adapters), `dash_allow` (list of address ranges, e.g. `["192.168.1.0/24", "100.64.0.0/10"]`), `dash_hostnames` (extra names), `dash_history_h` (hours of chart history kept in memory, default 12). Up to 8 pages can be open at once.
 
 ### Supply voltage, current and cable drop
 

@@ -15,9 +15,11 @@ import asyncio
 import logging
 import sys
 import time
+from collections import deque
 
 from . import protocol as P
 from .config import StationConfig, load_station
+from .dashboard import Dashboard, Extremes, History
 from .serial_link import BACK, LOST, FakeLink, KeyerLink, SerialLink
 from .telemetry import (
     SRC_BASE,
@@ -88,6 +90,19 @@ class TelemetryHub:
         self.box_hot = False
         self.fit = CableFit()                        # needs top-box voltage
         self.pwr_flags: dict[str, bool] = {}
+        # for the web dashboard
+        self.alerts: deque[dict] = deque(maxlen=200)
+        self.on_alert = None                          # callable(dict), set by the dashboard
+        self.extremes = Extremes()
+        self.history = History(cfg.dash_history_h)
+        self.history.pa_unit = "W" if self.pa_cal else "mV"
+        if cfg.dash_port and cfg.tlm_csv:
+            try:
+                n = self.history.seed_from_csv(cfg.tlm_csv)
+                if n:
+                    log.info("dashboard: loaded %d rows of history from %s", n, cfg.tlm_csv)
+            except (OSError, ValueError) as exc:
+                log.warning("dashboard: could not read history from %s: %s", cfg.tlm_csv, exc)
 
     def on_line(self, line: str) -> None:
         p = parse_any(line)
@@ -125,6 +140,13 @@ class TelemetryHub:
             "uptime_s": p.uptime_s,
             "loss_pct": round(self.stats.loss_pct_5min(), 1),
         }
+        now = time.time()
+        pa_pk = pa_pk_w if pa_pk_w is not None else p.pa_pk_mv
+        pa_avg = pa_avg_w if pa_avg_w is not None else p.pa_avg_mv
+        self.history.add_tower(now, pa_pk, pa_avg, p.xv_pk_mv, p.lock, p.temp_c, p.temp2_c)
+        self.extremes.add("pa_pk", pa_pk)
+        self.extremes.add("t1", p.temp_c)
+        self.extremes.add("t2", p.temp2_c)
         if self.stale:
             self.stale = False
             self._alert("ok", "tower telemetry link up")
@@ -166,6 +188,8 @@ class TelemetryHub:
                    "tower-top supply monitor answering again")
         if not p.ok:
             return
+        self.history.add_top(self.pwr_time, p)
+        self.extremes.add("top_v", p.v_min, p.v_max)
         self.fit.add(p.i_avg, p.v_avg)
         self._voltage_alerts(p, "tower-top supply", "top")
         if self.box is None or self.box_stale:       # the base box measures current when it's there
@@ -177,6 +201,11 @@ class TelemetryHub:
         self.box_stats.update(p)
         self.box = p
         self.box_time = time.time()
+        self.history.add_supply(self.box_time, p)
+        self.extremes.add("box_temp", p.temp_c)
+        if p.ok:
+            self.extremes.add("v", p.v_min, p.v_max)
+            self.extremes.add("i", p.i_min, p.i_max)
         if self.box_stale:
             self.box_stale = False
             self._alert("ok", "tower-base supply box link up")
@@ -307,6 +336,15 @@ class TelemetryHub:
     def _alert(self, level: str, msg: str) -> None:
         (log.warning if level == "warn" else log.info)("telemetry: %s", msg)
         self.notify({"t": "alert", "level": level, "msg": msg})
+        a = {"ts": time.time(), "level": level, "msg": msg}
+        self.alerts.append(a)
+        if self.on_alert:
+            self.on_alert(a)
+
+    def mark(self, text: str, peer: str = "") -> None:
+        """A note from the dashboard ("starting TX test"): goes to the log, the alert list and the client."""
+        log.info("dashboard marker from %s: %s", peer or "?", text)
+        self._alert("info", f"MARK: {text}")
 
 
 class StationService:
@@ -321,6 +359,7 @@ class StationService:
         self.wpm = 18
         self.server: asyncio.base_events.Server | None = None
         self._hb_task: asyncio.Task | None = None
+        self.dashboard: Dashboard | None = None
         link.set_handler(self._on_keyer_line)
         if tlm_link is not None:
             tlm_link.set_handler(self.tlm.on_line)
@@ -340,6 +379,17 @@ class StationService:
         self._hb_task = asyncio.create_task(self._keyer_heartbeat())
         addrs = ", ".join(str(s.getsockname()) for s in self.server.sockets)
         log.info("listening on %s", addrs)
+        if self.cfg.dash_port:
+            dash = Dashboard(self, self.cfg.dash_host, self.cfg.dash_port, self.cfg.dash_allow,
+                             self.cfg.dash_hostnames)
+            try:
+                await dash.start()
+            except OSError as exc:     # port in use etc.: keying must still come up
+                log.error("dashboard not started on port %s: %s", self.cfg.dash_port, exc)
+            else:
+                self.dashboard = dash
+                if self.tlm:
+                    self.tlm.on_alert = dash.push_alert
 
     @property
     def port(self) -> int:
@@ -350,6 +400,8 @@ class StationService:
         self._safe_off("service stopping")
         if self._hb_task:
             self._hb_task.cancel()
+        if self.dashboard:
+            await self.dashboard.stop()
         if self.server:
             self.server.close()
             await self.server.wait_closed()

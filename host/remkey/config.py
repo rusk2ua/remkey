@@ -42,6 +42,12 @@ class StationConfig:
     v_max_alert: float = 14.3        # 0 = off
     i_max_alert: float = 0.0         # peak current above this; 0 = off until you know normal
     i_min_alert: float = 0.0         # average current below this (something lost power); 0 = off
+    # --- web dashboard (telemetry monitor in a browser); dash_port = 0 turns it off ---
+    dash_port: int = 0
+    dash_host: str = "0.0.0.0"
+    dash_allow: list = field(default_factory=list)      # CIDRs; empty = home LAN + Tailscale
+    dash_hostnames: list = field(default_factory=list)  # extra names to accept in the Host header
+    dash_history_h: float = 12.0                        # hours of chart history kept in memory
 
 
 @dataclass

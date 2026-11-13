@@ -95,3 +95,14 @@ v_min_alert = 12.0
 v_max_alert = 14.3
 i_max_alert = 0.0      # peak current above this
 i_min_alert = 0.0      # average current below this (something in the box lost power)
+
+# ---------------------------------------------------------------------------
+# Web dashboard: live telemetry page for another computer or tablet in the
+# radio room (README section 9, "Web dashboard"). 0 = off.
+# Also allow the port through Windows Firewall once (see the README).
+# ---------------------------------------------------------------------------
+dash_port = 8080
+# dash_host = "0.0.0.0"                 # all adapters
+# dash_allow = ["192.168.1.0/24", "100.64.0.0/10"]   # default: home LAN ranges + Tailscale
+# dash_hostnames = []                   # extra names to accept besides IPs and machine names
+# dash_history_h = 12                   # hours of chart history kept in memory

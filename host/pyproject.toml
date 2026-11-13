@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "remkey"
-version = "0.6.0"
+version = "0.7.0"
 description = "Remote CW keying with local sidetone: Arduino Nano keyers + Python bridge"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -20,6 +20,9 @@ remkey-client = "remkey.client:main"
 
 [tool.setuptools]
 packages = ["remkey"]
+
+[tool.setuptools.package-data]
+remkey = ["web/*.html"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
