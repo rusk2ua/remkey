@@ -106,3 +106,13 @@ dash_port = 8080
 # dash_allow = ["192.168.1.0/24", "100.64.0.0/10"]   # default: home LAN ranges + Tailscale
 # dash_hostnames = []                   # extra names to accept besides IPs and machine names
 # dash_history_h = 12                   # hours of chart history kept in memory
+
+# ---------------------------------------------------------------------------
+# Cloud copy of the dashboard (README section 9, "Cloud copy"). Empty = off.
+# cloud/deploy.sh on the Mac prints the bucket name and makes the upload key;
+# needs: py -m pip install -e ".[cloud]"
+# ---------------------------------------------------------------------------
+cloud_bucket = ""
+# cloud_region = "us-east-1"
+# cloud_profile = "remkey-tlm"          # profile in %USERPROFILE%\.aws\credentials
+# cloud_interval_s = 15

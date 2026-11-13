@@ -48,6 +48,11 @@ class StationConfig:
     dash_allow: list = field(default_factory=list)      # CIDRs; empty = home LAN + Tailscale
     dash_hostnames: list = field(default_factory=list)  # extra names to accept in the Host header
     dash_history_h: float = 12.0                        # hours of chart history kept in memory
+    # --- cloud copy of the dashboard (S3 + CloudFront, see cloud/deploy.sh); empty bucket = off ---
+    cloud_bucket: str = ""
+    cloud_region: str = "us-east-1"
+    cloud_profile: str = "remkey-tlm"                   # credentials profile on this PC
+    cloud_interval_s: float = 15.0
 
 
 @dataclass

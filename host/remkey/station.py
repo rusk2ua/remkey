@@ -360,6 +360,7 @@ class StationService:
         self.server: asyncio.base_events.Server | None = None
         self._hb_task: asyncio.Task | None = None
         self.dashboard: Dashboard | None = None
+        self.cloud = None
         link.set_handler(self._on_keyer_line)
         if tlm_link is not None:
             tlm_link.set_handler(self.tlm.on_line)
@@ -390,6 +391,10 @@ class StationService:
                 self.dashboard = dash
                 if self.tlm:
                     self.tlm.on_alert = dash.push_alert
+        if self.cfg.cloud_bucket:
+            from .cloud import CloudUploader
+            self.cloud = CloudUploader(self)
+            self.cloud.start()
 
     @property
     def port(self) -> int:
@@ -402,6 +407,8 @@ class StationService:
             self._hb_task.cancel()
         if self.dashboard:
             await self.dashboard.stop()
+        if self.cloud:
+            await self.cloud.stop()
         if self.server:
             self.server.close()
             await self.server.wait_closed()

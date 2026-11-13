@@ -130,6 +130,7 @@ README section 9, "Wiring: supply box at the tower base".
 - [ ] Unplug the PSU Nano: `!! tower-base supply box lost` after `tlm_stale_s`
 - [ ] Later, once the tower box is up: PSU prints `I:tower heard, sending in its gaps`; loss on both links stays near zero
 - [ ] Optional web dashboard: `dash_port = 8080` in `station.toml`, firewall rule added (README section 9), page opens on the radio-room computer and shows the supply box live
+- [ ] Optional cloud copy: `cloud/deploy.sh` run from the Mac, upload key on the shack PC, `cloud_bucket` set; page loads away from home and shows data under 30 s old
 
 **Done when:** Ctrl-V shows the tower's supply voltage and current from the house, and the
 box's link loss stays near zero overnight.

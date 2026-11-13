@@ -1,0 +1,210 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  remkey tower telemetry, cloud copy: private S3 bucket behind CloudFront, a
+  password for people, a secret path for Claude, and an upload-only IAM user for
+  the shack PC. Deployed by cloud/deploy.sh (us-east-1).
+
+Parameters:
+  HostName:
+    Type: String
+    Description: Public name, e.g. tlm.microwavedx.com
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Route 53 zone that holds HostName
+  BucketName:
+    Type: String
+  SecretPath:
+    Type: String
+    NoEcho: true
+    AllowedPattern: "^[a-f0-9]{32}$"
+    Description: Random path prefix that skips the password (for Claude)
+  AuthHash:
+    Type: String
+    NoEcho: true
+    AllowedPattern: "^[a-f0-9]{64}$"
+    Description: SHA-256 (hex) of the full "Basic ..." Authorization header value
+  UploadUserName:
+    Type: String
+    Default: remkey-tlm-upload
+
+Resources:
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref HostName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref HostName
+          HostedZoneId: !Ref HostedZoneId
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${BucketName}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Viewer-request gate. /<secret>/... skips the password (Claude, bookmarks);
+  # everything else needs the Basic-auth password, checked against its hash.
+  # Only /index.html and /data/* are ever served.
+  AuthFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${BucketName}-auth"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: remkey telemetry password / secret path
+        Runtime: cloudfront-js-2.0
+      FunctionCode: !Sub |
+        var crypto = require('crypto');
+        var SECRET = '/${SecretPath}';
+        var AUTH_SHA256 = '${AuthHash}';
+
+        function deny() {
+          return {
+            statusCode: 401,
+            statusDescription: 'Unauthorized',
+            headers: {
+              'www-authenticate': { value: 'Basic realm="Tower telemetry", charset="UTF-8"' },
+              'cache-control': { value: 'no-store' }
+            }
+          };
+        }
+
+        function handler(event) {
+          var req = event.request;
+          var uri = req.uri;
+          if (uri === SECRET) {
+            return { statusCode: 302, statusDescription: 'Found',
+                     headers: { location: { value: SECRET + '/' } } };
+          }
+          if (uri.indexOf(SECRET + '/') === 0) {
+            uri = uri.substring(SECRET.length);
+          } else {
+            var h = req.headers.authorization;
+            if (!h || crypto.createHash('sha256').update(h.value).digest('hex') !== AUTH_SHA256) {
+              return deny();
+            }
+          }
+          if (uri === '/') {
+            uri = '/index.html';
+          }
+          if (uri.indexOf('..') >= 0 || (uri !== '/index.html' && uri.indexOf('/data/') !== 0)) {
+            return { statusCode: 404, statusDescription: 'Not Found' };
+          }
+          req.uri = uri;
+          return req;
+        }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: remkey tower telemetry
+        Enabled: true
+        Aliases:
+          - !Ref HostName
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          AcmCertificateArn: !Ref Certificate
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - Id: s3
+            DomainName: !GetAtt Bucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: s3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # Managed "CachingOptimized": honors the Cache-Control the uploader sets (5-120 s)
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt AuthFunction.FunctionMetadata.FunctionARN
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudFrontReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${Bucket}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  DnsA:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref HostName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2          # CloudFront's fixed zone ID
+
+  DnsAAAA:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref HostName
+      Type: AAAA
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+
+  # The shack PC's key can only write the data files: no read, list or delete,
+  # and nothing outside data/.
+  UploadUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref UploadUserName
+      Policies:
+        - PolicyName: remkey-tlm-put-data
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "arn:aws:s3:::${Bucket}/data/*"
+
+Outputs:
+  BucketName:
+    Value: !Ref Bucket
+  DistributionId:
+    Value: !Ref Distribution
+  DistributionDomain:
+    Value: !GetAtt Distribution.DomainName
+  UploadUser:
+    Value: !Ref UploadUser

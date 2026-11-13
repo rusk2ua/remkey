@@ -5,6 +5,20 @@ firmware and the remtlm telemetry firmware each carry their own version.
 
 ## 2026-11-13
 
+### Host package 0.8.0: cloud copy of the dashboard
+- The station service can push telemetry snapshots to S3 (`cloud_bucket` in
+  `station.toml`): current state every 15 s, the last hour every minute, 12 hours
+  every 5 minutes. Uploads run in a worker thread with short timeouts, one at a
+  time; failures are logged once (then every 10 minutes) and never touch keying.
+  The remote session (client address, PTT) is left out. Optional dependency:
+  `pip install -e ".[cloud]"` (boto3).
+- The dashboard page has a cloud mode: polls the uploaded JSON, shows how old the
+  data is, read-only.
+- New `cloud/`: CloudFormation template (private S3 bucket, CloudFront with an
+  ACM certificate, a CloudFront Function for the password prompt and the secret
+  path, Route 53 records, an IAM user that can only write `data/`) and
+  `cloud/deploy.sh` to deploy it from the Mac. CI lints both.
+
 ### Host package 0.7.0: web dashboard
 - The station service can serve a live telemetry page (`dash_port = 8080` in
   `station.toml`) for another computer, tablet or phone on the home network or

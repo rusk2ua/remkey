@@ -34,6 +34,19 @@ jobs:
       - name: Test
         run: python -m pytest -q
 
+  cloud:
+    name: Cloud copy (cfn-lint, shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Lint the CloudFormation template
+        run: python -m pip install cfn-lint && cfn-lint cloud/template.yaml
+      - name: Check the deploy script
+        run: shellcheck cloud/deploy.sh
+
   firmware-sim:
     name: Firmware simulation (g++)
     runs-on: ubuntu-latest

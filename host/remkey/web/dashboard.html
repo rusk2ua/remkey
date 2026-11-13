@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="remkey-mode" content="local">
 <title>Tower telemetry · remkey</title>
 <style>
 :root {
@@ -203,6 +204,10 @@ let rangeMin = 60;
 let lastStateAt = 0;
 let beep = false;
 const seenAlerts = new Set();
+// "local": served by the station service (live stream, buttons).
+// "cloud": the copy on S3/CloudFront; polls the JSON files the station uploads, read-only.
+const CLOUD = ($('meta[name="remkey-mode"]') || {}).content === "cloud";
+let lag = 0;               // cloud: seconds since the station uploaded the state we're showing
 
 // ---------------------------------------------------------------- formatting
 const num = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? "—" : Number(v).toFixed(d);
@@ -258,7 +263,7 @@ function render() {
     const stale = b.stale;
     setPill("#pill-supply", stale ? "s-bad" : !b.ok ? "s-warn" : "s-good",
       stale ? "lost" : !b.ok ? "INA226 not answering" : `${num(b.v_avg)} V · ${num(b.i_avg)} A`);
-    $("#supply-sub").textContent = `last packet ${ago(b.age_s)}`;
+    $("#supply-sub").textContent = `last packet ${ago(b.age_s + lag)}`;
     const vLow = L.v_min_alert && b.ok && b.v_min < L.v_min_alert;
     const vHigh = L.v_max_alert && b.ok && b.v_max > L.v_max_alert;
     const iHigh = L.i_max_alert && b.ok && b.i_max > L.i_max_alert;
@@ -302,7 +307,7 @@ function render() {
     const hot2 = t.temp2_c !== null && t.temp2_c >= L.temp2_warn_c;
     setPill("#pill-tower", t.stale ? "s-bad" : (t.lock === false || hot1 || hot2) ? "s-warn" : "s-good",
       t.stale ? "lost" : `${num(pk, d)} ${unit}${t.lock === false ? " · UNLOCKED" : ""}`);
-    $("#tower-sub").textContent = `last packet ${ago(t.age_s)}`;
+    $("#tower-sub").textContent = `last packet ${ago(t.age_s + lag)}`;
     const hero = el("div", { class: "hero" },
       el("div", {}, el("span", { class: "label", text: "PA peak" }), el("span", { class: "big", text: num(pk, d) }), el("span", { class: "unit", text: unit })),
       el("div", {}, el("span", { class: "label", text: "PA average" }), el("span", { class: "big", text: num(avg, d) }), el("span", { class: "unit", text: unit })));
@@ -326,13 +331,15 @@ function render() {
   if (xv.s || xv.v) {
     const kids = [];
     if (xv.v) kids.push(dl([["Firmware", xv.v.text.split("\n")[0]]]));
-    if (xv.s) { kids.push(el("pre", { text: xv.s.text })); $("#xv-sub").textContent = `status ${ago(xv.s.age_s)}`; }
+    if (xv.s) { kids.push(el("pre", { text: xv.s.text })); $("#xv-sub").textContent = `status ${ago(xv.s.age_s + lag)}`; }
     $("#xv-body").replaceChildren(...kids);
   }
 
   // --- station
   const s = S.station;
-  if (s.ptt) setPill("#pill-station", "s-ptt", s.releasing ? "PTT releasing" : "PTT ON");
+  $("#pill-station").style.display = s ? "" : "none";
+  if (!s) { /* cloud copy: the remote session isn't published */ }
+  else if (s.ptt) setPill("#pill-station", "s-ptt", s.releasing ? "PTT releasing" : "PTT ON");
   else setPill("#pill-station", s.client ? "s-good" : "", s.client ? `client ${s.client_peer || ""} · ${s.wpm} wpm` : "no client");
 
   renderAlerts();
@@ -556,7 +563,25 @@ for (const id of ["ch-volt", "ch-amp", "ch-temp", "ch-pa"]) {
 }
 
 // ---------------------------------------------------------------- data
+function trimHistory(h, minutes) {
+  // cloud files cover 1 h or 12 h; show just the chosen range
+  const since = h.until - minutes * 60;
+  const cut = part => {
+    const i = part.t.findIndex(t => t >= since);
+    const out = {};
+    for (const [k, v] of Object.entries(part)) out[k] = i < 0 ? [] : v.slice(i);
+    return out;
+  };
+  return { ...h, since, supply: cut(h.supply), tower: cut(h.tower), top: cut(h.top) };
+}
 async function loadHistory() {
+  if (CLOUD) {
+    try {
+      const r = await fetch(rangeMin <= 60 ? "data/recent.json" : "data/history.json", { cache: "no-store" });
+      if (r.ok) { const h = await r.json(); if (h) { H = trimHistory(h, rangeMin); drawAll(); } }
+    } catch (e) { /* the state poll shows the connection state */ }
+    return;
+  }
   const w = Math.max(200, Math.min(1500, Math.round(($("#ch-volt canvas").clientWidth || 600))));
   try {
     const r = await fetch(`/api/history?minutes=${rangeMin}&points=${Math.round(w / 2)}`, { cache: "no-store" });
@@ -592,11 +617,42 @@ function connect() {
     if (beep && a.level === "warn") playBeep();
   });
 }
+function noteAlerts(first) {
+  for (const a of S.alerts || []) {
+    const key = a.ts + a.msg;
+    if (seenAlerts.has(key)) continue;
+    seenAlerts.add(key);
+    if (!first && beep && a.level === "warn") playBeep();
+  }
+}
+async function pollCloud() {
+  try {
+    const r = await fetch("data/state.json", { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    const first = !S;
+    S = await r.json(); lastStateAt = Date.now();
+    noteAlerts(first);
+    if (first) loadHistory();
+  } catch (e) {
+    setPill("#pill-conn", "s-bad", "can't load data");
+  }
+  cloudTick();
+}
+function cloudTick() {
+  if (!S) return;
+  lag = Math.max(0, Date.now() / 1000 - (S.uploaded_at || S.now));
+  const every = S.interval_s || 15;
+  $(".note").textContent = `Read-only copy, updated by the station every ${Math.round(every)} s. Markers and resets are on the dashboard at home.`;
+  if (lag > every * 4) setPill("#pill-conn", "s-bad", `station not uploading · last ${ago(lag)}`);
+  else setPill("#pill-conn", "s-good", `cloud copy · updated ${ago(lag)}`);
+  render();
+}
 setInterval(() => {
   $("#clock").textContent = new Date().toLocaleTimeString();
+  if (CLOUD) { cloudTick(); return; }
   if (lastStateAt && Date.now() - lastStateAt > 5000) setPill("#pill-conn", "s-bad", "no data from station");
 }, 1000);
-setInterval(loadHistory, 10000);
+setInterval(loadHistory, CLOUD ? 30000 : 10000);
 
 // ---------------------------------------------------------------- buttons
 async function act(body) {
@@ -633,7 +689,15 @@ function playBeep() {
   o.start(); o.stop(actx.currentTime + 0.18);
 }
 
-connect();
+if (CLOUD) {
+  document.title = "Tower telemetry (cloud copy) · remkey";
+  for (const id of ["#btn-mark", "#btn-reset", "#btn-clear", "#mark-text"]) $(id).style.display = "none";
+  $(".note").textContent = "Read-only copy, updated by the station every few seconds. Markers and resets are on the dashboard at home.";
+  pollCloud();
+  setInterval(pollCloud, 5000);
+} else {
+  connect();
+}
 </script>
 </body>
 </html>

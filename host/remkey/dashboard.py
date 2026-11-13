@@ -494,53 +494,57 @@ class Dashboard:
 
     # ------------------------------------------------------------ state
     def state(self) -> dict:
-        svc = self.svc
-        cfg = svc.cfg
-        now = time.time()
-        sess = svc.session
-        st: dict[str, Any] = {
-            "now": now,
-            "station": {"client": bool(sess),
-                        "client_peer": str(sess.peer[0]) if sess and sess.peer else None,
-                        "ptt": svc.ptt, "releasing": svc.releasing, "wpm": svc.wpm},
-            "limits": {"v_min_alert": cfg.v_min_alert, "v_max_alert": cfg.v_max_alert,
-                       "i_max_alert": cfg.i_max_alert, "i_min_alert": cfg.i_min_alert,
-                       "temp_warn_c": cfg.temp_warn_c, "temp2_warn_c": cfg.temp2_warn_c,
-                       "box_temp_warn_c": cfg.box_temp_warn_c, "stale_s": cfg.tlm_stale_s},
-            "telemetry": svc.tlm is not None,
-        }
-        hub = svc.tlm
-        if hub is None:
-            return st
-        box = hub.box
-        st["supply"] = None if box is None else {
-            "ok": box.ok, "v_avg": box.v_avg, "v_min": box.v_min, "v_max": box.v_max,
-            "i_avg": box.i_avg, "i_min": box.i_min, "i_max": box.i_max,
-            "temp_c": box.temp_c, "temp_name": cfg.box_temp_name, "uptime_s": box.uptime_s,
-            "age_s": round(hub.box_stats.age_s() or 0.0, 1), "stale": hub.box_stale,
-            "loss_pct": round(hub.box_stats.loss_pct_5min(), 1),
-            "received": hub.box_stats.received, "lost": hub.box_stats.lost,
-            "resets": hub.box_stats.resets,
-        }
-        top = hub.pwr
-        st["top_supply"] = None if top is None else {
-            "ok": top.ok, "v_avg": top.v_avg, "v_min": top.v_min, "i_avg": top.i_avg,
-            "age_s": round(now - hub.pwr_time, 1),
-        }
-        lt = hub.latest
-        st["tower"] = None if lt is None else {
-            **{k: lt.get(k) for k in ("pa_pk_w", "pa_avg_w", "pa_pk_mv", "pa_avg_mv", "xv_pk_mv",
-                                      "xv_pk_w", "lock", "temp_c", "temp2_c", "temp_names", "uptime_s")},
-            "age_s": round(hub.stats.age_s() or 0.0, 1), "stale": hub.stale,
-            "loss_pct": round(hub.stats.loss_pct_5min(), 1), "received": hub.stats.received,
-            "lost": hub.stats.lost, "resets": hub.stats.resets,
-        }
-        st["drop_v"] = (box.v_avg - top.v_avg
-                        if box and top and box.ok and top.ok and not hub.box_stale
-                        and now - hub.pwr_time <= cfg.tlm_stale_s else None)
-        st["xv"] = {k: {"text": v["text"], "age_s": round(now - v["time"])}
-                    for k, v in hub.xv_replies.items()}
-        st["extremes"] = hub.extremes.as_dict()
-        st["alerts"] = list(hub.alerts)[-60:]
-        st["alert_count"] = len(hub.alerts)
+        return build_state(self.svc)
+
+
+def build_state(svc, public: bool = False) -> dict:
+    """Everything the page shows. public=True leaves out the remote session (client address, PTT)."""
+    cfg = svc.cfg
+    now = time.time()
+    sess = svc.session
+    st: dict[str, Any] = {
+        "now": now,
+        "station": None if public else {
+            "client": bool(sess), "client_peer": str(sess.peer[0]) if sess and sess.peer else None,
+            "ptt": svc.ptt, "releasing": svc.releasing, "wpm": svc.wpm},
+        "limits": {"v_min_alert": cfg.v_min_alert, "v_max_alert": cfg.v_max_alert,
+                   "i_max_alert": cfg.i_max_alert, "i_min_alert": cfg.i_min_alert,
+                   "temp_warn_c": cfg.temp_warn_c, "temp2_warn_c": cfg.temp2_warn_c,
+                   "box_temp_warn_c": cfg.box_temp_warn_c, "stale_s": cfg.tlm_stale_s},
+        "telemetry": svc.tlm is not None,
+    }
+    hub = svc.tlm
+    if hub is None:
         return st
+    box = hub.box
+    st["supply"] = None if box is None else {
+        "ok": box.ok, "v_avg": box.v_avg, "v_min": box.v_min, "v_max": box.v_max,
+        "i_avg": box.i_avg, "i_min": box.i_min, "i_max": box.i_max,
+        "temp_c": box.temp_c, "temp_name": cfg.box_temp_name, "uptime_s": box.uptime_s,
+        "age_s": round(hub.box_stats.age_s() or 0.0, 1), "stale": hub.box_stale,
+        "loss_pct": round(hub.box_stats.loss_pct_5min(), 1),
+        "received": hub.box_stats.received, "lost": hub.box_stats.lost,
+        "resets": hub.box_stats.resets,
+    }
+    top = hub.pwr
+    st["top_supply"] = None if top is None else {
+        "ok": top.ok, "v_avg": top.v_avg, "v_min": top.v_min, "i_avg": top.i_avg,
+        "age_s": round(now - hub.pwr_time, 1),
+    }
+    lt = hub.latest
+    st["tower"] = None if lt is None else {
+        **{k: lt.get(k) for k in ("pa_pk_w", "pa_avg_w", "pa_pk_mv", "pa_avg_mv", "xv_pk_mv",
+                                  "xv_pk_w", "lock", "temp_c", "temp2_c", "temp_names", "uptime_s")},
+        "age_s": round(hub.stats.age_s() or 0.0, 1), "stale": hub.stale,
+        "loss_pct": round(hub.stats.loss_pct_5min(), 1), "received": hub.stats.received,
+        "lost": hub.stats.lost, "resets": hub.stats.resets,
+    }
+    st["drop_v"] = (box.v_avg - top.v_avg
+                    if box and top and box.ok and top.ok and not hub.box_stale
+                    and now - hub.pwr_time <= cfg.tlm_stale_s else None)
+    st["xv"] = {k: {"text": v["text"], "age_s": round(now - v["time"])}
+                for k, v in hub.xv_replies.items()}
+    st["extremes"] = hub.extremes.as_dict()
+    st["alerts"] = list(hub.alerts)[-60:]
+    st["alert_count"] = len(hub.alerts)
+    return st

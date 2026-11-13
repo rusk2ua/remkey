@@ -62,6 +62,8 @@ host/remkey/powerstats.py      tower supply statistics from the CSV log; suggest
 host/remkey/e220.py            read or program an E220 LoRa module through a USB serial adapter
 host/remkey/dashboard.py       telemetry web dashboard served by the station service (section 9)
 host/remkey/web/dashboard.html the dashboard page (self-contained: no internet needed)
+host/remkey/cloud.py           uploads telemetry snapshots to S3 for the cloud copy (section 9)
+cloud/                         CloudFormation template + Mac deploy script for the cloud copy
 host/*.example.toml            config templates
 host/tests/                    pytest: protocol, end-to-end over localhost, telemetry
 tests/firmware_sim/            g++ simulation of the sketch (timing, decoder, watchdog)
@@ -679,6 +681,33 @@ netsh advfirewall firewall add rule name="remkey dashboard" dir=in action=allow 
 **Who can reach it.** The page answers only addresses in `dash_allow`, which defaults to private home-network ranges and Tailscale; anything else is dropped without a reply. It also only answers to an IP address or a plain machine name (`shackpc`, `shackpc.local`, `*.ts.net`) in the address bar; to use another name, list it in `dash_hostnames`. Those two checks, plus a header that only the page itself sends with its button presses, stop other websites from reaching it through your browser. The page has no password: anyone on your home WiFi can view it and press the three harmless buttons.
 
 **Settings** (in `station.toml`): `dash_port` (0 = off), `dash_host` (`0.0.0.0` = all adapters), `dash_allow` (list of address ranges, e.g. `["192.168.1.0/24", "100.64.0.0/10"]`), `dash_hostnames` (extra names), `dash_history_h` (hours of chart history kept in memory, default 12). Up to 8 pages can be open at once.
+
+### Cloud copy (optional): the dashboard from anywhere
+
+The station service can also push the dashboard's data to an S3 bucket every 15 seconds, so you (and Claude) can check the tower from anywhere without opening anything at home. The shack PC only ever sends: nothing on the internet can reach the station, and the copy is read-only.
+
+```
+shack PC ──HTTPS PUT every 15 s──► S3 bucket (private) ◄── CloudFront ◄── browser / Claude
+          data/state.json                                  tlm.<your domain>
+          data/recent.json   (1 h, every 60 s)
+          data/history.json  (12 h, every 5 min)
+```
+
+- **People** open `https://tlm.<your domain>/` and log in with a user name and password (a browser password prompt, checked by a CloudFront Function).
+- **Claude** (any Claude app, phone included) reads `https://tlm.<your domain>/<secret>/data/state.json`, where `<secret>` is a long random path that skips the password. `https://tlm.<your domain>/<secret>/` is also the full page without a password: keep that link private.
+- **Left out on purpose:** the remote session (client address, PTT). Readings, alerts and the transverter status go up as on the home dashboard. The markers, resets and alert-list clearing stay on the home dashboard.
+- **If the internet or AWS is down**, the station logs one warning (and a reminder every 10 minutes) and keeps trying; keying and the home dashboard aren't affected. The page shows how old its data is and turns red if the station stops uploading.
+- **Cost:** about $1 a month, nearly all of it S3 upload requests (state every 15 s, recent history every minute, 12-hour history every 5 minutes). CloudFront traffic for a few viewers stays inside its always-free allowance.
+
+**Setting it up** (once, from the Mac, with the AWS CLI signed in to the account that hosts your domain's Route 53 zone):
+
+1. Run `cloud/deploy.sh`. It asks for a user name and password for the page, then creates the bucket, certificate, CloudFront distribution, password function, DNS records and an upload-only IAM user, and uploads the page. The first run takes 5-15 minutes. Use `REMKEY_TLM_HOST` / `REMKEY_TLM_ZONE` for a different host name.
+2. It writes the shack PC's upload key to `~/remkey-tlm-upload-key.txt`. On the shack PC, put those three lines in `%USERPROFILE%\.aws\credentials` (create the folder and file if needed), then delete the text file from the Mac. That key can only write `data/` files to that one bucket.
+3. On the shack PC: `py -m pip install -e ".[cloud]"` in the `host` folder (adds boto3), add the `cloud_bucket = "..."` line the script printed to `station.toml`, and restart the station service. The log shows `cloud: uploading to s3://.../data/ every 15 s`.
+
+Run `cloud/deploy.sh` again after pulling a new version, to update the page. `--new-password`, `--new-secret` and `--new-key` change the password, the secret path and the upload key. The secret path and a hash of the password are kept in `cloud/cloud.env` on the Mac (git-ignored); the password itself is stored nowhere.
+
+**Settings** (in `station.toml`): `cloud_bucket` (empty = off), `cloud_region` (default `us-east-1`), `cloud_profile` (the credentials profile, default `remkey-tlm`), `cloud_interval_s` (default 15, minimum 5).
 
 ### Supply voltage, current and cable drop
 
