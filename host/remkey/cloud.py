@@ -59,7 +59,7 @@ def make_s3_client(region: str, profile: str):
         raise RuntimeError(
             f"boto3 isn't installed for the Python running the station ({sys.executable}); "
             f'install it with: "{sys.executable}" -m pip install -e ".[cloud]"  '
-            "(or host\\Install-remkey.bat cloud)") from None
+            "(or, in the host folder: .\\Install-remkey.bat cloud)") from None
 
     session = boto3.Session(profile_name=profile or None, region_name=region or None)
     return session.client("s3", config=Config(connect_timeout=5, read_timeout=10,

@@ -207,9 +207,9 @@ The serial command set is documented at the top of `remkey.ino`.
 2. Install remkey:
    ```
    cd remkey\host
-   Install-remkey.bat
+   .\Install-remkey.bat
    ```
-   It installs into the same Python that `Start-remkey.bat` (step 6) runs: `host\.venv` if you've made one, otherwise `py`. Use it for every later update too (`git pull`, then `Install-remkey.bat`). Installing with a bare `py -m pip ...` while a `.venv` exists puts packages where the station never looks: the code itself still updates, because the install is editable, but new dependencies (like boto3 for the cloud copy) go missing.
+   It installs into the same Python that `Start-remkey.bat` (step 6) runs: `host\.venv` if you've made one, otherwise `py`. Use it for every later update too (`git pull`, then `.\Install-remkey.bat`). Installing with a bare `py -m pip ...` while a `.venv` exists puts packages where the station never looks: the code itself still updates, because the install is editable, but new dependencies (like boto3 for the cloud copy) go missing.
 3. Configure:
    ```
    py -m remkey.genkey                  (copy the output)
@@ -705,7 +705,7 @@ shack PC ──HTTPS PUT every 15 s──► S3 bucket (private) ◄── Cloud
 
 1. Run `cloud/deploy.sh`. It asks for a user name and password for the page, then creates the bucket, certificate, CloudFront distribution, password function, DNS records and an upload-only IAM user, and uploads the page. The first run takes 5-15 minutes. Use `REMKEY_TLM_HOST` / `REMKEY_TLM_ZONE` for a different host name.
 2. It writes the shack PC's upload key to `~/remkey-tlm-upload-key.txt`. On the shack PC, put those three lines in `%USERPROFILE%\.aws\credentials` (create the folder and file if needed), then delete the text file from the Mac. That key can only write `data/` files to that one bucket. The file must be named exactly `credentials`, with no extension: Notepad tends to add `.txt`, so check with `Get-ChildItem $HOME\.aws` and rename it if needed.
-3. On the shack PC: run `Install-remkey.bat cloud` in the `host` folder (adds boto3 to the Python the station runs), add the `cloud_bucket = "..."` line the script printed to `station.toml`, and restart the station service. The log shows `cloud: uploading to s3://.../data/ every 15 s` and no warning after it. If it says boto3 isn't installed, the message names the Python to install it into.
+3. On the shack PC: run `.\Install-remkey.bat cloud` in the `host` folder (adds boto3 to the Python the station runs), add the `cloud_bucket = "..."` line the script printed to `station.toml`, and restart the station service. The log shows `cloud: uploading to s3://.../data/ every 15 s` and no warning after it. If it says boto3 isn't installed, the message names the Python to install it into.
 
 Run `cloud/deploy.sh` again after pulling a new version, to update the page. `--new-password`, `--new-secret` and `--new-key` change the password, the secret path and the upload key. The secret path and a hash of the password are kept in `cloud/cloud.env` on the Mac (git-ignored); the password itself is stored nowhere.
 

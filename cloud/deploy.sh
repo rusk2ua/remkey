@@ -151,5 +151,5 @@ Claude:  https://$HOST/$SECRET_PATH/data/summary.html
 
 In the shack PC's station.toml:
   cloud_bucket = "$BUCKET"
-then, in the host folder:  Install-remkey.bat cloud   and restart the station service.
+then, in the host folder:  .\Install-remkey.bat cloud   and restart the station service.
 EOF
