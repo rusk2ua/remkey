@@ -771,6 +771,11 @@ The manual lists what `s` reports (sequencer delays, frequency settings, referen
 - Serial protocol: newline-terminated commands at 115200 baud, documented at the top of `firmware/remkey/remkey.ino`.
 - Telemetry packets: `$RT,...` tower readings, `$RS,...` supply-box readings, `$RP,...` optional top-box supply readings and `$RK,...` transverter replies, documented in `firmware/remtlm/tlm_proto.h`.
 
+## Related
+
+- [hamradiogenai](https://github.com/rusk2ua/hamradiogenai) ([website](https://rusk2ua.github.io/hamradiogenai/)): a guide to using generative AI for amateur radio projects. remkey is one of its gallery projects, and its field notes include remkey's real-station findings.
+- [10ghzdx.com/mud2026](https://10ghzdx.com/mud2026): landing page for the author's Microwave Update 2026 talk, where remkey was one of the demos.
+
 ## License
 
 MIT. © 2026 Rus Healy, K2UA.
