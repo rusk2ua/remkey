@@ -207,8 +207,9 @@ The serial command set is documented at the top of `remkey.ino`.
 2. Install remkey:
    ```
    cd remkey\host
-   py -m pip install -e .
+   Install-remkey.bat
    ```
+   It installs into the same Python that `Start-remkey.bat` (step 6) runs: `host\.venv` if you've made one, otherwise `py`. Use it for every later update too (`git pull`, then `Install-remkey.bat`). Installing with a bare `py -m pip ...` while a `.venv` exists puts packages where the station never looks: the code itself still updates, because the install is editable, but new dependencies (like boto3 for the cloud copy) go missing.
 3. Configure:
    ```
    py -m remkey.genkey                  (copy the output)
@@ -691,19 +692,20 @@ shack PC ──HTTPS PUT every 15 s──► S3 bucket (private) ◄── Cloud
           data/state.json                                  tlm.<your domain>
           data/recent.json   (1 h, every 60 s)
           data/history.json  (12 h, every 5 min)
+          data/summary.html  (plain summary for Claude, every 60 s)
 ```
 
 - **People** open `https://tlm.<your domain>/` and log in with a user name and password (a browser password prompt, checked by a CloudFront Function).
-- **Claude** (any Claude app, phone included) reads `https://tlm.<your domain>/<secret>/data/state.json`, where `<secret>` is a long random path that skips the password. `https://tlm.<your domain>/<secret>/` is also the full page without a password: keep that link private.
+- **Claude** (any Claude app, phone included) reads `https://tlm.<your domain>/<secret>/data/summary.html`, a plain page with the current readings and recent alerts, uploaded every minute (Claude's web fetch reads HTML but not JSON from this site). `<secret>` is a long random path that skips the password. `https://tlm.<your domain>/<secret>/` is also the full page without a password: keep that link private.
 - **Left out on purpose:** the remote session (client address, PTT). Readings, alerts and the transverter status go up as on the home dashboard. The markers, resets and alert-list clearing stay on the home dashboard.
 - **If the internet or AWS is down**, the station logs one warning (and a reminder every 10 minutes) and keeps trying; keying and the home dashboard aren't affected. The page shows how old its data is and turns red if the station stops uploading.
-- **Cost:** about $1 a month, nearly all of it S3 upload requests (state every 15 s, recent history every minute, 12-hour history every 5 minutes). CloudFront traffic for a few viewers stays inside its always-free allowance.
+- **Cost:** a bit over $1 a month, nearly all of it S3 upload requests (state every 15 s; the summary and recent history every minute; 12-hour history every 5 minutes). CloudFront traffic for a few viewers stays inside its always-free allowance.
 
 **Setting it up** (once, from the Mac, with the AWS CLI signed in to the account that hosts your domain's Route 53 zone):
 
 1. Run `cloud/deploy.sh`. It asks for a user name and password for the page, then creates the bucket, certificate, CloudFront distribution, password function, DNS records and an upload-only IAM user, and uploads the page. The first run takes 5-15 minutes. Use `REMKEY_TLM_HOST` / `REMKEY_TLM_ZONE` for a different host name.
-2. It writes the shack PC's upload key to `~/remkey-tlm-upload-key.txt`. On the shack PC, put those three lines in `%USERPROFILE%\.aws\credentials` (create the folder and file if needed), then delete the text file from the Mac. That key can only write `data/` files to that one bucket.
-3. On the shack PC: `py -m pip install -e ".[cloud]"` in the `host` folder (adds boto3), add the `cloud_bucket = "..."` line the script printed to `station.toml`, and restart the station service. The log shows `cloud: uploading to s3://.../data/ every 15 s`.
+2. It writes the shack PC's upload key to `~/remkey-tlm-upload-key.txt`. On the shack PC, put those three lines in `%USERPROFILE%\.aws\credentials` (create the folder and file if needed), then delete the text file from the Mac. That key can only write `data/` files to that one bucket. The file must be named exactly `credentials`, with no extension: Notepad tends to add `.txt`, so check with `Get-ChildItem $HOME\.aws` and rename it if needed.
+3. On the shack PC: run `Install-remkey.bat cloud` in the `host` folder (adds boto3 to the Python the station runs), add the `cloud_bucket = "..."` line the script printed to `station.toml`, and restart the station service. The log shows `cloud: uploading to s3://.../data/ every 15 s` and no warning after it. If it says boto3 isn't installed, the message names the Python to install it into.
 
 Run `cloud/deploy.sh` again after pulling a new version, to update the page. `--new-password`, `--new-secret` and `--new-key` change the password, the secret path and the upload key. The secret path and a hash of the password are kept in `cloud/cloud.env` on the Mac (git-ignored); the password itself is stored nowhere.
 

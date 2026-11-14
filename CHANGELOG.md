@@ -3,6 +3,20 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-13 (later)
+
+### Host package 0.8.1
+- Cloud copy: the station also uploads `data/summary.html` every minute, a
+  plain, script-free page with the current readings and recent alerts, so Claude
+  can read the station's status from any app (its web fetch reads HTML but not
+  JSON from the site).
+- New `host\Install-remkey.bat [cloud]`: installs into the same Python that
+  `Start-remkey.bat` runs (`host\.venv` if present). The README now uses it;
+  plain `py -m pip` missed the venv, so new dependencies never reached the station.
+- "boto3 not installed" now names the Python the station runs and how to fix it.
+- `pyproject.toml`: SPDX license string and the `remkey.web` package listed, which
+  clears setuptools' deprecation warnings during install.
+
 ## 2026-11-13
 
 ### Host package 0.8.0: cloud copy of the dashboard

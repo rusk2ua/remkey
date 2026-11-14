@@ -110,7 +110,7 @@ dash_port = 8080
 # ---------------------------------------------------------------------------
 # Cloud copy of the dashboard (README section 9, "Cloud copy"). Empty = off.
 # cloud/deploy.sh on the Mac prints the bucket name and makes the upload key;
-# needs: py -m pip install -e ".[cloud]"
+# needs boto3: run host\Install-remkey.bat cloud
 # ---------------------------------------------------------------------------
 cloud_bucket = ""
 # cloud_region = "us-east-1"

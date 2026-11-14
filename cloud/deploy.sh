@@ -146,10 +146,10 @@ fi
 say "Done"
 cat <<EOF
 People:  https://$HOST/                 (user "$AUTH_USER" + your password)
-Claude:  https://$HOST/$SECRET_PATH/data/state.json
+Claude:  https://$HOST/$SECRET_PATH/data/summary.html
          https://$HOST/$SECRET_PATH/      (the page, no password: keep this link private)
 
 In the shack PC's station.toml:
   cloud_bucket = "$BUCKET"
-then:  py -m pip install -e ".[cloud]"   (in the host folder) and restart the station service.
+then, in the host folder:  Install-remkey.bat cloud   and restart the station service.
 EOF
