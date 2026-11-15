@@ -1,0 +1,5 @@
+*.dsn
+*.ses
+*.kicad_prl
+*-backups/
+__pycache__/
