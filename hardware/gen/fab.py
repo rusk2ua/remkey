@@ -46,6 +46,10 @@ with open(d / f"{name}-bom.csv", "w", newline="") as f:
         refs = sorted(refs, key=lambda r: key([r]))
         w.writerow([len(refs), " ".join(refs), val, lib or "custom"])
 
+# 1:1 print for checking module fit (pads, outlines, labels, board edge; A4 page)
+run("kicad-cli", "pcb", "export", "pdf", "--layers", "F.Mask,F.SilkS,Edge.Cuts", "--black-and-white",
+    "-o", str(fab / f"{name}-print-1to1.pdf"), str(pcb))
+
 # renders
 img = d / "img"
 img.mkdir(exist_ok=True)

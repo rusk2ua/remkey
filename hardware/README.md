@@ -16,6 +16,10 @@ Each folder has the KiCad 7 board (`*.kicad_pcb`), a Gerber + drill zip for the 
 
 ![Shack board, top](shack/img/shack-top.png)
 
+## Checking the fit on paper
+
+Each `fab/` folder has a `*-print-1to1.pdf`: the pads, outlines, labels and board edge at full size. Print it at 100% (Actual size, not Fit), then check the scale: the supply-box and tower boards measure 102 mm across, the shack board 64 mm. Push the modules' pins through the pad dots into a piece of foam or cardboard to check every footprint.
+
 ## Ordering (JLCPCB)
 
 Upload the zip from `fab/` as it is. The defaults are fine: 2 layers, 1.6 mm FR-4, 1 oz copper, HASL. The four buck-module holes are plated slots (1.0 × 2.2 mm). JLCPCB makes those without extra charge, and they show up as slots in the drill file.
