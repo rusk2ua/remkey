@@ -18,7 +18,7 @@ Each folder has the KiCad 7 board (`*.kicad_pcb`), a Gerber + drill zip for the 
 
 ## Checking the fit on paper
 
-Each `fab/` folder has a `*-print-1to1.pdf`: the pads, outlines, labels and board edge at full size. Print it at 100% (Actual size, not Fit), then check the scale: the supply-box and tower boards measure 102 mm across, the shack board 64 mm. Push the modules' pins through the pad dots into a piece of foam or cardboard to check every footprint.
+Each `fab/` folder has a `*-print-letter.pdf`: the pads, outlines, labels and board edge at full size on US Letter, with a 100 mm scale bar. Print it at 100% (Actual size, not Fit), then measure the bar. It must be exactly 100 mm. Push the modules' pins through the pad dots into a piece of foam or cardboard to check every footprint. (`*-print-1to1.pdf` is KiCad's own A4 plot of the same thing.)
 
 ## Ordering (JLCPCB)
 

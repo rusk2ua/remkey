@@ -50,6 +50,8 @@ with open(d / f"{name}-bom.csv", "w", newline="") as f:
 run("kicad-cli", "pcb", "export", "pdf", "--layers", "F.Mask,F.SilkS,Edge.Cuts", "--black-and-white",
     "-o", str(fab / f"{name}-print-1to1.pdf"), str(pcb))
 
+subprocess.run(["python3", str(Path(__file__).parent / "letterprint.py"), name], check=True)  # needs pymupdf
+
 # renders
 img = d / "img"
 img.mkdir(exist_ok=True)
