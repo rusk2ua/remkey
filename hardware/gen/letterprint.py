@@ -6,8 +6,8 @@ import sys
 import pymupdf
 
 MM = 72 / 25.4
-name = sys.argv[1]
-src = pymupdf.open(f"{name}/fab/{name}-print-1to1.pdf")
+name, tag = sys.argv[1], sys.argv[2]
+src = pymupdf.open(f"{name}/fab/{tag}-{name}-print-1to1.pdf")
 pg = src[0]
 xs, ys = [], []
 for d in pg.get_drawings():
@@ -26,7 +26,7 @@ y0 = 40 * MM
 page.show_pdf_page(pymupdf.Rect(x0, y0, x0 + clip.width, y0 + clip.height), src, 0, clip=clip)
 
 title = {"psu": "remtlm supply box", "tower": "remtlm tower top", "shack": "remtlm shack (base)"}[name]
-page.insert_text((x0, 22 * MM), f"{title}: full-size fit check", fontsize=14)
+page.insert_text((x0, 22 * MM), f"{tag.replace('-rev', ' Rev ')}  {title}: full-size fit check", fontsize=14)
 page.insert_text((x0, 29 * MM), "Print at 100% / Actual size on Letter paper. Then measure the bar below:", fontsize=10)
 page.insert_text((x0, 34 * MM), "it must be exactly 100 mm. If not, the printer is scaling - don't use the print.",
                  fontsize=10)
@@ -41,5 +41,5 @@ page.insert_text((bx + 47 * MM, yb + 5 * MM), "50", fontsize=9)
 page.insert_text((bx + 96 * MM, yb + 5 * MM), "100 mm", fontsize=9)
 bw = {"psu": "102 x 52", "tower": "102 x 52", "shack": "64 x 40"}[name]
 page.insert_text((bx, yb + 12 * MM), f"Board outline: {bw} mm.  Nano pin rows: 15.24 mm (0.6 in) apart.", fontsize=10)
-out.save(f"{name}/fab/{name}-print-letter.pdf")
+out.save(f"{name}/fab/{tag}-{name}-print-letter.pdf")
 print(name, "letter print ok")

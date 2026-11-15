@@ -3,6 +3,7 @@
 usage: fab.py <name>        (run from hardware/, e.g. fab.py psu)
 """
 import csv
+import json
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,8 @@ import pcbnew  # noqa: E402
 
 name = sys.argv[1]
 d = Path(name)
+info = json.load(open(Path(__file__).parent.parent / "boards.json"))[name]
+tag = f"{info['pn']}-rev{info['rev']}"
 pcb = d / f"{name}.kicad_pcb"
 fab = d / "fab"
 shutil.rmtree(fab, ignore_errors=True)
@@ -25,7 +28,7 @@ run("kicad-cli", "pcb", "export", "gerbers", "--layers",
     "-o", f"{fab}/gerbers/", str(pcb))
 run("kicad-cli", "pcb", "export", "drill", "--format", "excellon", "--excellon-separate-th",
     "-o", f"{fab}/gerbers/", str(pcb))
-with zipfile.ZipFile(fab / f"remtlm-{name}-gerbers.zip", "w", zipfile.ZIP_DEFLATED) as z:
+with zipfile.ZipFile(fab / f"{tag}-{name}-gerbers.zip", "w", zipfile.ZIP_DEFLATED) as z:
     for f in sorted((fab / "gerbers").iterdir()):
         z.write(f, f.name)
 shutil.rmtree(fab / "gerbers")
@@ -41,6 +44,7 @@ for fp in board.GetFootprints():
 key = lambda r: (r[0].rstrip("0123456789"), int("0" + r[0][len(r[0].rstrip("0123456789")):]))  # noqa: E731
 with open(d / f"{name}-bom.csv", "w", newline="") as f:
     w = csv.writer(f)
+    w.writerow([f"{info['pn']} Rev {info['rev']} ({info['date']})", info["title"], "", ""])
     w.writerow(["Qty", "Refs", "Value / part", "Footprint"])
     for (val, lib), refs in sorted(rows.items(), key=lambda kv: key(sorted(kv[1])[0:1] or [""])):
         refs = sorted(refs, key=lambda r: key([r]))
@@ -48,9 +52,9 @@ with open(d / f"{name}-bom.csv", "w", newline="") as f:
 
 # 1:1 print for checking module fit (pads, outlines, labels, board edge; A4 page)
 run("kicad-cli", "pcb", "export", "pdf", "--layers", "F.Mask,F.SilkS,Edge.Cuts", "--black-and-white",
-    "-o", str(fab / f"{name}-print-1to1.pdf"), str(pcb))
+    "-o", str(fab / f"{tag}-{name}-print-1to1.pdf"), str(pcb))
 
-subprocess.run(["python3", str(Path(__file__).parent / "letterprint.py"), name], check=True)  # needs pymupdf
+subprocess.run(["python3", str(Path(__file__).parent / "letterprint.py"), name, tag], check=True)  # needs pymupdf
 
 # renders
 img = d / "img"

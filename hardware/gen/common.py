@@ -172,7 +172,59 @@ class Board:
         return fp
 
     def mount(self, ref, x, y):
-        return self.lib(ref, "MountingHole", "MountingHole_3.2mm_M3", x, y, {}, "M3")
+        """#4-40 mounting hole: 3.2 mm unplated, with a 7.6 mm copper keep-out on both
+        layers (clears a 1/4 in hex standoff, #4 split washer and pan head) and a silk
+        ring showing the hardware's footprint."""
+        fp = self._new_fp(ref, "#4-40 mounting hole")
+        p = pcbnew.PAD(fp)
+        p.SetNumber("")
+        p.SetAttribute(pcbnew.PAD_ATTRIB_NPTH)
+        p.SetLayerSet(p.UnplatedHoleMask())
+        p.SetShape(pcbnew.PAD_SHAPE_CIRCLE)
+        p.SetDrillSize(pcbnew.VECTOR2I(mm(3.2), mm(3.2)))
+        p.SetSize(pcbnew.VECTOR2I(mm(3.2), mm(3.2)))
+        fp.Add(p)
+        self._place(fp, x, y)
+        c = pcbnew.PCB_SHAPE(self.b, pcbnew.SHAPE_T_CIRCLE)
+        c.SetCenter(pt(x, y))
+        c.SetEnd(pt(x + 3.5, y))
+        c.SetLayer(pcbnew.F_SilkS)
+        c.SetWidth(mm(0.15))
+        self.b.Add(c)
+        z = pcbnew.ZONE(self.b)
+        z.SetIsRuleArea(True)
+        z.SetDoNotAllowCopperPour(True)
+        z.SetDoNotAllowTracks(True)
+        z.SetDoNotAllowVias(True)
+        z.SetDoNotAllowPads(False)
+        z.SetDoNotAllowFootprints(False)
+        ls = pcbnew.LSET()
+        ls.AddLayer(pcbnew.F_Cu)
+        ls.AddLayer(pcbnew.B_Cu)
+        z.SetLayerSet(ls)
+        ol = z.Outline()
+        ol.NewOutline()
+        import math
+        for k in range(32):
+            v = pt(x + 3.8 * math.cos(2 * math.pi * k / 32), y + 3.8 * math.sin(2 * math.pi * k / 32))
+            ol.Append(v.x, v.y)
+        self.b.Add(z)
+        self.holes = getattr(self, "holes", []) + [(x, y)]
+        return fp
+
+    def ident(self, name, x, y, lines=2):
+        """Part number, revision and date from hardware/boards.json, on the top silk."""
+        import json
+        import os
+        info = json.load(open(os.path.join(os.path.dirname(__file__), "..", "boards.json")))[name]
+        self.info = info
+        self.text(f"{info['pn']}  Rev {info['rev']}", x, y, 1.2)
+        self.text(f"{info['title']}  {info['date']}", x, y + 2.0, 0.8)
+        return info
+
+    def jlc_marker(self, x, y):
+        """Where JLCPCB prints its order number (choose 'Specify a location' when ordering)."""
+        self.text("JLCJLCJLCJLC", x, y, 0.8)
 
     def nano(self, ref, x_usb, y_analog, nets):
         """Arduino Nano in two 1x15 sockets, USB end pointing +x (towards x_usb).

@@ -3,6 +3,19 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-15 (later)
+
+### Hardware: part numbers and Rev A
+- Boards numbered RK-301 (supply box), RK-302 (tower top) and RK-303 (shack base), all
+  Rev A. The part number and revision come from `hardware/boards.json`, appear on the
+  silkscreen, in the fab-file names and in the BOM header, and are logged in
+  `hardware/REVISIONS.md` (frozen once ordered; changes after that start a new letter).
+- #4-40 mounting holes near the corners (four, four, three), each with a 7.6 mm copper
+  keep-out and a silk ring for the hardware.
+- JLCPCB order-number position marked under each Nano.
+- Letter-size fit-check prints with a 100 mm scale bar; the build re-routes a board
+  until DRC shows nothing unconnected.
+
 ## 2026-11-15
 
 ### Hardware (new)

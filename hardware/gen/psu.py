@@ -13,7 +13,7 @@ b.wire("W1", 5.0, 17.0, 16, "VIN", "+14V", ly=13.6)
 b.wire("W2", 5.0, 25.0, 16, "GND", "GND", ly=21.6)
 b.lib("F1", "Capacitor_THT", "C_Disc_D7.5mm_W5.0mm_P5.00mm", 10.5, 12.0, {"1": "VIN", "2": "VFUSED"},
       "PTC 0.5A hold (e.g. RXEF050)")
-b.text("F1 PTC 0.5A", 13.0, 8.4, 0.8)
+b.text("F1 PTC 0.5A", 17.4, 12.0, 0.8, just="l")
 b.buck("U1", 15.0, 36.0, {"IN+": "VFUSED", "IN-": "GND", "OUT-": "GND", "OUT+": "+5V"})
 
 # INA226 module (CJMCU-226) in a 1x8 socket; body above the header row
@@ -73,8 +73,8 @@ b.text("C1 100uF", 85.75, 36.2, 0.8)
 for i, (x, y) in enumerate(((11.0, 4.5), (91.0, 4.5), (11.0, 47.5), (91.0, 47.5))):
     b.mount(f"H{i + 1}", x, y)
 
-b.text("remtlm PSU box  v1.0", 58.0, 3.4, 1.2)
-b.text("Hammond 1590B", 58.0, 5.6, 0.8)
+b.ident("psu", 58.0, 3.4)
+b.jlc_marker(77.0, 28.6)
 
 b.gnd_pour()
 b.save(sys.argv[1] if len(sys.argv) > 1 else "psu.kicad_pcb")
