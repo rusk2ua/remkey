@@ -10,7 +10,7 @@ Qty,Refs,Value / part,Footprint
 2,R9 R11,22k,R_Axial_DIN0207_L6.3mm_D2.5mm_P2.54mm_Vertical
 1,R12,100k,R_Axial_DIN0207_L6.3mm_D2.5mm_P2.54mm_Vertical
 1,R13,4.7k,R_Axial_DIN0207_L6.3mm_D2.5mm_P2.54mm_Vertical
-1,U1,"mini buck module, set 5.0 V",custom
+1,U1,"mini buck module, fixed 5 V out (5-28 V in)",custom
 1,U2,AMS1117-3.3 module (1x3 socket),custom
 1,U3,"BSS138 4ch shifter, LV row (1x6 socket)",custom
 1,U4,"BSS138 4ch shifter, HV row (1x6 socket)",custom

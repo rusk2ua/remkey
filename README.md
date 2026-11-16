@@ -467,7 +467,7 @@ The station service opens both shack ports. The keying path and the telemetry pa
 | 3 | Arduino Nano | Tower top, supply box, radio room |
 | 9+9 | 1 kΩ and 2 kΩ resistors | 5 V → 3.3 V dividers on E220 M0, M1 and RXD, at each Nano |
 | 3 | 100 µF electrolytic | Across the E220 VCC/GND pins (TX current peaks) |
-| 2 | 5 V buck module (MP1584 or similar) + 1 A fuse | Tower top and supply box: supply → 5 V |
+| 2 | Mini buck module, fixed 5 V output (5–28 V in) + 0.5 A-hold polyfuse (e.g. RXEF050) | Tower top and supply box: supply → 5 V. Fixed output, nothing to set |
 | 1 | AMS1117-3.3 module (or any 3.3 V LDO) | Tower: low-voltage side of the level shifter |
 | 1 | 4-channel BSS138 level-shifter module | Tower: Nano ↔ MKU serial (3.3 V) |
 | 2 | DS18B20 waterproof probes + one 4.7 kΩ resistor | Tower: both on one bus |
@@ -542,7 +542,7 @@ The same wiring as schematics, in two parts: the signals (PA sense, MKU CON1, le
   - Clamp one DS18B20 under a heatsink screw near the PA device and the other on the MKU housing, both with thermal compound.
   - The MKU is rated for +55 °C case and disables transmit above +65 °C. The default alert for probe 2 is 50 °C.
   - Probe order on the bus is fixed by each probe's serial number, not by wiring. Warm one in your hand while watching `tlmview` to see which is which. Then set `temp_names` in `station.toml`, or swap the probes.
-- **ADC reference:** measure the buck's 5 V rail with a DMM and enter it as `VREF_MV`. The ADC uses that rail as its reference.
+- **ADC reference:** the buck's output is fixed at 5 V, but each module is a little off. Measure the actual rail with a DMM and enter it as `VREF_MV`. The ADC uses that rail as its reference.
 - **Command terminator:** if the MKU doesn't answer `s`, it may want a line terminator. Set `XV_CMD_SUFFIX "\r"` in `config.h`.
 
 ### Wiring: supply box at the tower base (PSU Nano)

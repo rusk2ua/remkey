@@ -337,15 +337,15 @@ def tlm_power():
     d.add(elm.Line().down().at((gx, pa.y)).length(0.4))
     d.add(elm.Ground())
 
-    # logic supply: fuse -> buck (5.0 V) -> AMS1117-3.3
+    # logic supply: polyfuse -> fixed 5 V buck -> AMS1117-3.3
     d.add(elm.Line().at(load).down().length(0.8))
-    d.add(elm.Fuse().down().length(2.0).label("1 A", loc="bottom"))
+    d.add(elm.Fuse().down().length(2.0).label("PTC 0.5 A", loc="bottom"))
     f_end = d.here
     buck = d.add(_box(
         pins=[elm.IcPin(name="IN−", side="left"), elm.IcPin(name="IN+", side="left"),
               elm.IcPin(name="OUT−", side="right"), elm.IcPin(name="OUT+", side="right")],
         pinspacing=1.6, edgepadW=1.4, leadlen=0.6,
-        label="buck\n(MP1584)\nset 5.0 V", lblsize=11).anchor("IN+").at((f_end[0] + 1.2, f_end[1] - 0.6)))
+        label="buck\nfixed 5 V\n(5–28 V in)", lblsize=11).anchor("IN+").at((f_end[0] + 1.2, f_end[1] - 0.6)))
     _wire(d, f_end, (f_end[0], buck.absanchors["IN+"].y), buck.absanchors["IN+"])
     p = buck.absanchors["IN−"]
     _wire(d, p, (f_end[0], p.y))
@@ -465,15 +465,15 @@ def tlm_psu():
     _net(d, pr.absanchors["VDD"], "+5V", "down", 0.4)
     d.add(elm.Ground().at(pr.absanchors["GND"]))
 
-    # box logic supply: tapped ahead of the shunt -> fuse -> buck (5.0 V)
+    # box logic supply: tapped ahead of the shunt -> polyfuse -> fixed 5 V buck
     d.add(elm.Line().at(tap).down().length(0.8))
-    d.add(elm.Fuse().down().length(2.0).label("1 A", loc="bottom"))
+    d.add(elm.Fuse().down().length(2.0).label("PTC 0.5 A", loc="bottom"))
     f_end = d.here
     buck = d.add(_box(
         pins=[elm.IcPin(name="IN−", side="left"), elm.IcPin(name="IN+", side="left"),
               elm.IcPin(name="OUT−", side="right"), elm.IcPin(name="OUT+", side="right")],
         pinspacing=1.6, edgepadW=1.4, leadlen=0.6,
-        label="buck\n(MP1584)\nset 5.0 V", lblsize=11).anchor("IN+").at((f_end[0] - 9.0, f_end[1] - 3.4)))
+        label="buck\nfixed 5 V\n(5–28 V in)", lblsize=11).anchor("IN+").at((f_end[0] - 9.0, f_end[1] - 3.4)))
     _wire(d, f_end, (f_end[0], f_end[1] - 1.0), (buck.absanchors["IN+"].x - 0.8, f_end[1] - 1.0),
           (buck.absanchors["IN+"].x - 0.8, buck.absanchors["IN+"].y), buck.absanchors["IN+"])
     p = buck.absanchors["IN−"]

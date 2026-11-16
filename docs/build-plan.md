@@ -22,7 +22,7 @@ The E220 modules usually ship from China and are the slowest item, so order earl
 - [ ] 2× DS18B20 waterproof probes
 - [ ] 1× BSS138 4-channel level shifter
 - [ ] 1× AMS1117-3.3 module
-- [ ] 1× MP1584 (or similar) 5 V buck module and a 1 A fuse
+- [ ] 1× mini buck module, fixed 5 V output (5–28 V in), and a 0.5 A-hold polyfuse
 - [ ] 1× INA226 module (e.g. CJMCU-226): supply box at the tower base
 - [x] 1× 20 A / 75 mV panel-meter shunt (3.75 mΩ): ordered
 - [ ] Supply box: 3rd Nano, 3rd E220 + antenna, 1× DS18B20, 5 V buck + 1 A fuse

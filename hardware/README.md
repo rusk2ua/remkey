@@ -53,7 +53,7 @@ The 1 × 7 header on each board runs M0, M1, RXD, TXD, AUX, VCC, GND, in the mod
   - Supply box: a 1 × 8 for the INA226 module.
   - Tower: two 1 × 6 for the shifter and a 1 × 3 for the AMS1117 module.
   - Buck module: four header pins, one in each corner pad.
-- **Buck module:** set it to 5.0 V before plugging in the Nano. The board marks IN+, IN−, OUT+ and OUT− at the four slots. Check them against the labels printed on the module's underside before soldering. Viewed from above with the inductor on the right, the corners are IN− top-left, OUT− top-right, IN+ bottom-left and OUT+ bottom-right.
+- **Buck module:** a fixed 5 V output module (5–28 V in), so there's nothing to set; measure its output once for `VREF_MV`. The board marks IN+, IN−, OUT+ and OUT− at the four slots. Check them against the labels printed on the module's underside before soldering. Viewed from above with the inductor on the right, the corners are IN− top-left, OUT− top-right, IN+ bottom-left and OUT+ bottom-right.
 - **INA226 module (supply box):**
   - Remove its R100 shunt resistor; the external shunt does the work (or set `SHUNT_UOHM` as the README describes).
   - The board ties VBS to IN−, so bus voltage is measured on the tower side of the shunt.

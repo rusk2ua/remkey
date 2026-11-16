@@ -33,6 +33,8 @@ First release, not yet ordered.
   for the standoff, split washer and pan head. Four each on RK-301 and RK-302, three on RK-303.
 - 0.5 A-hold polyfuse on the logic supply (RK-301, RK-302).
 - JLCPCB order-number position marked under the Nano.
+- Buck module is the fixed 5 V output type (5–28 V in), not an adjustable MP1584: no
+  setting needed (2026-11-15; description and docs only, no copper change).
 - Paper fit check (2026-11-15): the buck, INA226 and Nano match the full-size prints.
   The 100 mm scale bar printed true.
 - Pre-release drafts (2026-11-15, commits ffa92ff to cc20196) carried "v1.0" on the

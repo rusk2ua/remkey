@@ -3,6 +3,15 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-15 (evening)
+
+### Docs
+- The 5 V buck is the fixed-output mini module (5–28 V in), not an adjustable MP1584:
+  README parts table, build plan, hardware README, board BOMs and the supply-box and
+  tower-power schematics updated, with nothing left to set. The schematics also show
+  the 0.5 A polyfuse instead of a 1 A fuse. `VREF_MV` still comes from measuring the
+  actual 5 V rail.
+
 ## 2026-11-15 (later)
 
 ### Hardware: part numbers and Rev A

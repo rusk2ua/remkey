@@ -7,6 +7,6 @@ Qty,Refs,Value / part,Footprint
 3,R1 R3 R5,1k,R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal
 3,R2 R4 R6,2k,R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal
 1,R7,4.7k,R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal
-1,U1,"mini buck module, set 5.0 V",custom
+1,U1,"mini buck module, fixed 5 V out (5-28 V in)",custom
 1,U2,CJMCU-226 INA226 module (1x8 socket),custom
 1,U3,Arduino Nano (2x15 sockets),custom
