@@ -62,7 +62,7 @@ The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16;
 - +14 V tap (supply side of the shunt) → power board A11
 - Supply GND → A15
 - Shunt sense leads → J2 (SHUNT+, supply side) and J3 (SHUNT−, tower side)
-- Buck: IN+ A13, IN− B15, OUT− C15, OUT+ A17
+- Buck (on foam tape over the power board's right half, rows 11–16): IN+ A13, IN− B15, OUT− C15, OUT+ A17
 - DS18B20: yellow F6, red J7, black I8 on the interface board
 
 ## Parts
@@ -75,7 +75,7 @@ The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16;
 | 2 (1 per E220 board) | 100 nF ceramic | B15 to B16 |
 | 1 | 4.7 kΩ | Standing, I6–I7 (PSU interface) |
 | 1 | Polyfuse, 0.5 A hold | Standing, C11–C13 (PSU power) |
-| 1 | Fixed 5 V buck module | Beside the power board, short wires to its corner pads |
+| 1 | Fixed 5 V buck module | On foam tape over the empty right half of the power board (rows 11–16), short insulated wires from its corner pads to A13, B15, C15, A17. Don't solder its pads into the holes: the row strips would short IN+ to OUT+ |
 | 1 | INA226 module (R100 removed) | Header in F2–F9 of the power board |
 | 1 | DS18B20 probe | PSU interface board |
 

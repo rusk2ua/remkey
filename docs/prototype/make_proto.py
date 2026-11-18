@@ -276,6 +276,12 @@ def psu_power_board():
     # power, left half rows 11-17
     d.wire("A11", "+14 V tap (supply side of the shunt)", COL["14v"], "l")
     d.cap("C11", "C13", "PTC 0.5 A")
+    x0, y0 = d.xy("F11")
+    x1, y1 = d.xy("J16")
+    d.el.append(f'<rect x="{x0 - 10}" y="{y0 - 10}" width="{x1 - x0 + 20}" height="{y1 - y0 + 20}" rx="4" '
+                'fill="#333" opacity="0.6" stroke="#fff" stroke-dasharray="5,4"/>')
+    d.el.append(f'<text x="{(x0 + x1) / 2}" y="{(y0 + y1) / 2 - 4}" class="sm" fill="#fff" text-anchor="middle">buck</text>')
+    d.el.append(f'<text x="{(x0 + x1) / 2}" y="{(y0 + y1) / 2 + 14}" class="tiny" fill="#fff" text-anchor="middle">on foam tape</text>')
     d.wire("A13", "buck IN+", COL["14v"], "l")
     d.wire("A15", "supply GND", COL["gnd"], "l")
     d.wire("B15", "buck IN-", COL["gnd"], "l", lane=-0.5)
@@ -301,8 +307,10 @@ def psu_power_board():
             "  buck OUT+ -> A17 (row 17 = +5 V)",
             "  +5 V (J9) and GND (J8) -> interface board",
             "",
-            "Buck: fixed 5 V, nothing to set. Short wires from its",
-            "corner pads; it can sit beside the board.",
+            "Buck: fixed 5 V, nothing to set. Stick it on foam tape",
+            "over the empty right half, rows 11-16, and run short",
+            "insulated wires from its corner pads. Don't solder its",
+            "pads into the holes: rows would short IN+ to OUT+.",
             "The +14 V tap is the box's own supply only; the",
             "tower's main current never passes through here."])
     return d
