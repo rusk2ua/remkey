@@ -29,7 +29,7 @@ The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16;
 
 ### Supply-box power board
 
-![PSU power board](proto-psu-power.png)
+![PSU power board](proto-psu-power.png?v=2)
 
 ## Nano screw terminals
 
