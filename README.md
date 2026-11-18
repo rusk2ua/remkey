@@ -69,6 +69,7 @@ host/tests/                    pytest: protocol, end-to-end over localhost, tele
 tests/firmware_sim/            g++ simulation of the sketch (timing, decoder, watchdog)
 .github/workflows/ci.yml       CI: Python on Linux/Windows/macOS, simulation, firmware builds
 docs/build-plan.md             phased build checklist, parts to tower installation
+docs/serial-commands.md        sending CW by hand from the Serial Monitor
 CHANGELOG.md                   per-component versions and changes
 CONTRIBUTING.md, SECURITY.md   how to run the checks; security model and reporting
 ```
@@ -195,11 +196,11 @@ pio run -e client  -t upload --upload-port /dev/cu.usbserial-110
 pio run -e station -t upload --upload-port COM7
 ```
 
-**Check it.** Open a serial monitor at 115200 baud with line ending set to newline. You should see `V:remkey 0.1.0 client` (or `station`). Type `?` to get a status line. On the client, send a few characters with the paddle and you'll see `K:` lines. On the station, `T:CQ` keys the opto and `P:1` / `P:0` drive PTT.
+**Check it.** Open a serial monitor at 115200 baud with line ending set to newline. You should see `V:remkey 0.4.1 client` (or `station`; the number is the firmware version). Type `?` to get a status line. On the client, send a few characters with the paddle and you'll see `K:` lines. On the station, `T:CQ` keys the opto and `P:1` / `P:0` drive PTT.
 
 Station watchdog: with PTT on or text queued, if the Nano hears nothing from the PC for 3 s it drops PTT, flushes text and prints `!:WDOG`. The service sends a heartbeat every second, so this only fires if the service or PC hangs.
 
-The serial command set is documented at the top of `remkey.ino`.
+The serial command set is documented at the top of `remkey.ino`. For keying a Nano by hand from the Serial Monitor, see [docs/serial-commands.md](docs/serial-commands.md).
 
 ---
 
