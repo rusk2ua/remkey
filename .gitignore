@@ -14,3 +14,4 @@ remkey-tlm.csv
 .DS_Store
 tests/firmware_sim/remtlm_sim_*
 !tests/firmware_sim/remtlm_sim.cpp
+CLAUDE.md
