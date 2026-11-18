@@ -101,7 +101,7 @@
 #define INA226_ADDR      0x40     // A0 and A1 address pins to GND
 #define SHUNT_UOHM       3750L    // 20 A / 75 mV panel shunt
 #define PWR_SAMPLE_MS    10UL     // the INA226 produces a new averaged reading every 8.8 ms
-#define PWR_RETRY_MS     5000UL   // re-initialise this often if the INA226 stops answering
+#define PWR_RETRY_MS     5000UL   // re-initialize this often if the INA226 stops answering
 #define PWR_FAIL_LIMIT   5        // consecutive failed reads before it counts as not answering
 
 // ---------------------------------------------------------------------------

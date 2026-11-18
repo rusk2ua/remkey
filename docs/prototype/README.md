@@ -11,7 +11,7 @@ A bench prototype of the shack (BASE) and supply-box (PSU) nodes, to run while t
 | Shack | E220 board → ribbon → shack interface board | Screw-terminal carrier, USB from the shack PC |
 | Supply box | E220 board → ribbon → PSU interface board, plus the PSU power board | Screw-terminal carrier, powered from its 5V terminal |
 
-The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16; M0 is the pin next to the module's four small holes), ribbon header in C10–C16. Build the supply box's E220 board the same way. The ribbon colours run purple M0, blue M1, green RXD, yellow TXD, orange AUX, red VCC, gold GND. The other end lands in A2–A8 of the interface board in that order: purple in A2 through gold in A8.
+The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16; M0 is the pin next to the module's four small holes), ribbon header in C10–C16. Build the supply box's E220 board the same way. The ribbon colors run purple M0, blue M1, green RXD, yellow TXD, orange AUX, red VCC, gold GND. The other end lands in A2–A8 of the interface board in that order: purple in A2 through gold in A8.
 
 **Why there's an interface board:** the E220 uses 3.3 V logic, so the three Nano outputs that drive it (M0, M1, RXD) each need a 1k/2k divider. The 1k has to sit in series between the Nano pin and the E220 pin. On the E220 board each header pin shares a row with its E220 pin, so there's no place for it there.
 

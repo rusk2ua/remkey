@@ -2,7 +2,7 @@
 
 A phased path from parts on the bench to a hardened remote station. Each phase ends
 with something working that can be tested on its own, and nothing touches the tower
-or goes on the air until the safety behaviour has been proven on the bench.
+or goes on the air until the safety behavior has been proven on the bench.
 
 The telemetry work (phases 5–7, and 5S for the supply box at the tower base) needs no
 radio connection, so it can run in parallel with phases 1–4. Phase 5S can go first:

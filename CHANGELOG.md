@@ -120,7 +120,7 @@ firmware and the remtlm telemetry firmware each carry their own version.
 ### Host package 0.6.0
 - Parses `$RS`; separate link statistics, link-up and stale alerts for the
   supply box (`tower-base supply box lost`), a box temperature alert
-  (`box_temp_name`, `box_temp_warn_c`), and voltage alerts labelled by where they
+  (`box_temp_name`, `box_temp_warn_c`), and voltage alerts labeled by where they
   were measured (`at tower base` / `tower-top`).
 - Ctrl-V / the supply line show the base supply, box temperature and link loss;
   with a top INA226 as well, the top voltage and the measured cable drop. The

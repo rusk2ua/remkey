@@ -42,7 +42,7 @@ Sending raw key-down/key-up events across the internet doesn't work: network jit
 
 The radio transmits each character roughly one character-time after you send it. That's under a second at 15–20 WPM, which doesn't matter on 10 GHz. You still hear the radio's real sidetone in the remote audio stream (delayed), so you can confirm what actually went out.
 
-Anything the decoder doesn't recognise, such as SK or a fumbled character, is passed through as a raw element pattern like `{...-.-}`. The station sends it element-for-element, so nothing is lost or "corrected."
+Anything the decoder doesn't recognize, such as SK or a fumbled character, is passed through as a raw element pattern like `{...-.-}`. The station sends it element-for-element, so nothing is lost or "corrected."
 
 **Long dash strings (antenna peaking).** Hold the dah paddle and the far end hears zeros: once a 6th dah follows five, the client sends those five as `0` and keeps going, so the station starts sending about one group (~1.3 s at 18 WPM) after you start, rather than after you stop. When you let go, the leftover dashes go out as an ordinary character (T, M, O).
 
@@ -373,7 +373,7 @@ The firmware simulation checks:
 
 - PARIS at 20 WPM takes exactly 46 units with 22 units of key-down.
 - Raw patterns and word spacing.
-- Iambic A/B squeeze behaviour.
+- Iambic A/B squeeze behavior.
 - Paddle decode of `CQ TEST K2UA`, and unknown patterns.
 - Tune timing and the 30 s cap.
 - The watchdog, with and without heartbeats.
@@ -638,7 +638,7 @@ In `station.toml`, set `tlm_port` to the base Nano's COM port. Then:
   - 10 MHz reference unlock
   - either probe at or above its limit (`temp_warn_c`, `temp2_warn_c`)
   - no packets for `tlm_stale_s`, separately for the top box (`tower telemetry lost`) and the supply box (`tower-base supply box lost`)
-  - supply below `v_min_alert` or above `v_max_alert` (checked at each INA226, labelled `at tower base` or `tower-top`), current above `i_max_alert` or below `i_min_alert`, or an INA226 not answering
+  - supply below `v_min_alert` or above `v_max_alert` (checked at each INA226, labeled `at tower base` or `tower-top`), current above `i_max_alert` or below `i_min_alert`, or an INA226 not answering
   - supply box at or above `box_temp_warn_c`
 - **TX summary:** when you drop PTT, the client prints `last TX: PA peak … W | supply min … V, peak … A`.
 - **CSV log:** every reading is also logged to `remkey-tlm.csv`, which gives you temperature, voltage and current history: one row per top-box packet, or per supply-box packet while the top box is silent. `supply_at` says where the voltage was measured (`base` or `top`), and `top_v_avg` holds the top voltage when both boxes measure. The station log records each transverter reply.

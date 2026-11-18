@@ -88,7 +88,7 @@ i_scale = 1.0
 
 # Alerts. 0 turns one off. Leave the current limits at 0 until you know what's
 # normal, then run:  python -m remkey.powerstats remkey-tlm.csv --config station.toml
-# The voltage limits apply to each INA226 (labelled "at tower base" / "tower-top").
+# The voltage limits apply to each INA226 (labeled "at tower base" / "tower-top").
 # With only the base box, v_min_alert checks the supply's own output: 12.0 is the
 # MKU 10 G5's minimum at the top, so set it nearer 13.5 until a top INA226 exists.
 v_min_alert = 12.0

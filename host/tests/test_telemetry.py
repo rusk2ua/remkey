@@ -369,7 +369,7 @@ def test_powerstats_on_synthetic_log(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "RECEIVE: 300 intervals" in out and "TRANSMIT: 100 intervals" in out
     assert "consistent with #12" in out
-    groups = powerstats.summarise(list(__import__("csv").DictReader(path.open())), 150)
+    groups = powerstats.summarize(list(__import__("csv").DictReader(path.open())), 150)
     s = powerstats.suggest(groups, 14.1)
     assert s["i_max_alert"] == 8.5                             # 6.7 A peak * 1.2 -> 8.04 -> 8.5
     assert s["v_max_alert"] == 14.3

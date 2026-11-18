@@ -1,4 +1,4 @@
-"""Summarise tower supply readings from the telemetry CSV and suggest alert limits.
+"""Summarize tower supply readings from the telemetry CSV and suggest alert limits.
 
     python -m remkey.powerstats remkey-tlm.csv
     python -m remkey.powerstats remkey-tlm.csv --config station.toml --since 2026-11-01
@@ -10,7 +10,7 @@ some transmitting, then copy the suggested limits into station.toml.
 
 The cable fit needs the voltage at the top of the tower: a top-box INA226
 (remtlm PWR_ENABLE 1). With only the tower-base supply box, voltage and current
-are summarised but the cable resistance isn't estimated.
+are summarized but the cable resistance isn't estimated.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def pct(values: list[float], p: float) -> float:
     return xs[lo] + (xs[hi] - xs[lo]) * (k - lo)
 
 
-def summarise(rows: list[dict], tx_mv: float) -> dict:
+def summarize(rows: list[dict], tx_mv: float) -> dict:
     rx, tx = [], []
     for r in rows:
         try:
@@ -97,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
 
     with open(args.csv, newline="", encoding="utf-8") as f:
         rows = [r for r in csv.DictReader(f) if not args.since or r.get("time", "") >= args.since]
-    groups = summarise(rows, args.tx_mv)
+    groups = summarize(rows, args.tx_mv)
     out = sys.stdout
     print(f"{len(rows)} rows read; supply at the tower base set to {base_v:.2f} V\n", file=out)
     describe("RECEIVE", groups["rx"], out)

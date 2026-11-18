@@ -254,7 +254,7 @@ class Board:
     def buck(self, ref, cx, cy, nets):
         """The 18.7 x 11.9 mm fixed-5 V mini buck module, standing on header pins in its corner pads.
 
-        Pad centres 14.5 x 8.6 mm (as measured); plated slots along x take
+        Pad centers 14.5 x 8.6 mm (as measured); plated slots along x take
         13.3-15.7 mm. Viewed from above with the inductor on the right:
         IN- top-left, OUT- top-right, IN+ bottom-left, OUT+ bottom-right."""
         fp = self._new_fp(ref, "mini buck module, fixed 5 V out (5-28 V in)")

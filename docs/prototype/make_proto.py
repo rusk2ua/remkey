@@ -168,7 +168,7 @@ def e220_board():
             "100 uF electrolytic: + lead in A15, - lead in A16.",
             "100 nF ceramic: B15 to B16.",
             "",
-            "Ribbon colours (as plugged into C10-C16):",
+            "Ribbon colors (as plugged into C10-C16):",
             "purple M0, blue M1, green RXD, yellow TXD,",
             "orange AUX, red VCC, gold GND.",
             "Check with a meter: red should read the E220's",

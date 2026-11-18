@@ -16,7 +16,7 @@
 // Serial protocol (115200 baud, newline-terminated lines):
 //   host -> keyer                     keyer -> host
 //   T:<text>   queue text to send     K:<c>    paddle character ("K: " = word space,
-//   W:<wpm>    set speed                       "K:{.-..-}" = unrecognised pattern)
+//   W:<wpm>    set speed                       "K:{.-..-}" = unrecognized pattern)
 //   F:<hz>     sidetone frequency     B:P      PTT input closed (button press / switch on)
 //                                    B:R      PTT input opened (button release / switch off)
 //                                    B:H      PTT input already closed at power-up
