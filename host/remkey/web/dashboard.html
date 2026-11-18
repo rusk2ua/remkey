@@ -294,6 +294,12 @@ function render() {
   } else if (S.telemetry) {
     setPill("#pill-supply", "", "not heard");
     $("#supply-sub").textContent = "";
+    const r = S.receiver || {};
+    const rx = !r.up ? st("bad", `${r.port}: disconnected`)
+      : r.config == null ? st("off", `${r.port}: open, no startup report yet`)
+      : r.config_ok ? st("good", `${r.port}: ${r.version || "remtlm"} · E220 OK (${r.config})`)
+      : st("bad", `${r.port}: E220 config error (${r.config})`);
+    $("#supply-body").replaceChildren(el("div", { class: "empty", text: "Waiting for the supply box." }), dl([["Shack receiver", rx]]));
   }
 
   // --- tower top

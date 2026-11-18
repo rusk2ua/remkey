@@ -89,6 +89,12 @@ class TelemetryHub:
         self.box_stale = True
         self.box_hot = False
         self.fit = CableFit()                        # needs top-box voltage
+        # the shack receiver (base Nano) itself: its startup report and port state
+        self.base_version: str | None = None         # "remtlm 0.4.0 base"
+        self.base_config: str | None = None          # "ok ch=77 freq_khz=927125 ..." or "ERR ..."
+        self.base_config_ok: bool | None = None
+        self.base_time = 0.0
+        self.base_up = True
         self.pwr_flags: dict[str, bool] = {}
         # for the web dashboard
         self.alerts: deque[dict] = deque(maxlen=200)
@@ -105,6 +111,14 @@ class TelemetryHub:
                 log.warning("dashboard: could not read history from %s: %s", cfg.tlm_csv, exc)
 
     def on_line(self, line: str) -> None:
+        if line == LOST:
+            self.base_up = False
+            self._alert("warn", f"shack receiver on {self.cfg.tlm_port} disconnected")
+            return
+        if line == BACK:
+            self.base_up = True
+            self._alert("info", f"shack receiver on {self.cfg.tlm_port} reconnected")
+            return
         p = parse_any(line)
         if isinstance(p, ReplyPart):
             self._on_reply(p)
@@ -115,6 +129,14 @@ class TelemetryHub:
         if not isinstance(p, Packet):
             if line.startswith(("V:", "C:")):
                 log.info("telemetry base: %s", line)
+                self.base_time = time.time()
+                if line.startswith("V:"):
+                    self.base_version = line[2:].strip()
+                else:
+                    self.base_config = line[2:].strip()
+                    self.base_config_ok = self.base_config.startswith("ok")
+                    if not self.base_config_ok:
+                        self._alert("warn", f"shack receiver: E220 {self.base_config}")
             elif line.startswith("E:"):
                 log.warning("telemetry base: %s", line)
             return
@@ -626,7 +648,7 @@ async def _amain(cfg: StationConfig, dry_run: bool) -> None:
     link: KeyerLink = FakeLink() if dry_run else SerialLink(cfg.keyer_port, cfg.keyer_baud, loop)
     tlm_link: KeyerLink | None = None
     if cfg.tlm_port and not dry_run:
-        tlm_link = SerialLink(cfg.tlm_port, cfg.tlm_baud, loop)
+        tlm_link = SerialLink(cfg.tlm_port, cfg.tlm_baud, loop, keep_boot=True)
     svc = StationService(cfg, link, tlm_link)
     await svc.start()
     try:

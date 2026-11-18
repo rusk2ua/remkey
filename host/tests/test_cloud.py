@@ -189,3 +189,32 @@ def test_missing_boto3_message_names_the_interpreter(monkeypatch):
     with pytest.raises(RuntimeError) as e:
         cloud_mod.make_s3_client("us-east-1", "x")
     assert sys.executable in str(e.value) and "[cloud]" in str(e.value)
+
+
+async def test_summary_reports_the_shack_receiver():
+    svc = service()
+    s3, clock = FakeS3(), Clock()
+    up = CloudUploader(svc, client_factory=lambda: s3, clock=clock)
+    await up.tick()
+    page = next(p["Body"] for p in s3.puts if p["Key"] == "data/summary.html").decode()
+    assert "Shack receiver" in page and "open, no startup report yet" in page
+
+    svc.tlm.on_line("V:remtlm 0.4.0 base")
+    svc.tlm.on_line("C:ok ch=77 freq_khz=927125")
+    clock.t += 61
+    await up.tick()
+    page = [p["Body"] for p in s3.puts if p["Key"] == "data/summary.html"][-1].decode()
+    assert "remtlm 0.4.0 base; E220 config OK (ok ch=77 freq_khz=927125)" in page
+
+    svc.tlm.on_line("C:ERR read config: no reply")
+    assert svc.tlm.base_config_ok is False
+    assert any("E220 ERR read config" in a["msg"] for a in svc.tlm.alerts)
+
+    from remkey.serial_link import BACK, LOST
+    svc.tlm.on_line(LOST)
+    clock.t += 61
+    await up.tick()
+    page = [p["Body"] for p in s3.puts if p["Key"] == "data/summary.html"][-1].decode()
+    assert "disconnected" in page
+    svc.tlm.on_line(BACK)
+    assert svc.tlm.base_up

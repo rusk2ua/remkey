@@ -3,6 +3,17 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-18 (host 0.8.2)
+
+### Host
+- The station keeps the shack receiver's startup report. The telemetry port no longer
+  flushes what the base Nano prints after its reset, so `V:remtlm … base` and
+  `C:ok ch=…` (or `C:ERR …`) reach the log. The dashboard and the cloud summary now
+  show a "Shack receiver" line: port open or disconnected, firmware version, and
+  whether the Nano could read the E220's configuration. A `C:ERR` raises an alert.
+- SerialLink holds any lines that arrive before the owner attaches its handler, so
+  nothing printed right after the port opens is lost.
+
 ## 2026-11-18
 
 ### Docs

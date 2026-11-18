@@ -198,6 +198,16 @@ def summary_html(st: dict) -> str:
     rows: list[tuple[str, str]] = [("Station clock at upload", when)]
     if not st.get("telemetry"):
         rows.append(("Telemetry", "off (tlm_port not set on the shack PC)"))
+    r = st.get("receiver")
+    if r is not None:
+        if not r.get("up"):
+            rx = f"{r.get('port')}: disconnected"
+        elif r.get("config") is None:
+            rx = f"{r.get('port')}: open, no startup report yet"
+        else:
+            e220 = "E220 config OK" if r.get("config_ok") else "E220 config ERROR"
+            rx = f"{r.get('port')}: {r.get('version') or 'remtlm'}; {e220} ({r.get('config')})"
+        rows.append(("Shack receiver", rx))
     b = st.get("supply")
     if b is None:
         rows.append(("Supply box (tower base)", "not heard since the station started"))

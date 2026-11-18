@@ -38,7 +38,7 @@ class SerialLink:
 
     def __init__(self, port: str, baud: int = 115200, loop: asyncio.AbstractEventLoop | None = None,
                  opener: Callable[..., object] | None = None, retry_s: float = 1.0,
-                 boot_s: float = 2.0):
+                 boot_s: float = 2.0, keep_boot: bool = False):
         if opener is None:
             import serial  # pyserial; imported here so tests don't need it
 
@@ -48,8 +48,10 @@ class SerialLink:
         self._open = opener
         self._retry_s = retry_s
         self._boot_s = boot_s
+        self._keep_boot = keep_boot
         self._loop = loop or asyncio.get_event_loop()
-        self._handler: Callable[[str], None] = lambda line: None
+        self._handler: Callable[[str], None] | None = None
+        self._pending: list[str] = []         # lines that arrived before set_handler
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._ser = self._connect()
@@ -59,6 +61,10 @@ class SerialLink:
 
     def _connect(self):
         ser = self._open(self.port, self.baud, timeout=0.2)
+        if self._keep_boot:
+            # The owner wants the Nano's startup lines (e.g. the remtlm base's
+            # V: and C: report), so read from the start instead of flushing.
+            return ser
         # Opening the port resets a Nano (DTR). Give the bootloader time to hand over.
         time.sleep(self._boot_s)
         ser.reset_input_buffer()
@@ -66,9 +72,18 @@ class SerialLink:
 
     def set_handler(self, handler: Callable[[str], None]) -> None:
         self._handler = handler
+        pending, self._pending = self._pending, []
+        for line in pending:
+            handler(line)
+
+    def _deliver(self, line: str) -> None:
+        if self._handler is None:
+            self._pending.append(line)
+        else:
+            self._handler(line)
 
     def _emit(self, line: str) -> None:
-        self._loop.call_soon_threadsafe(self._handler, line)
+        self._loop.call_soon_threadsafe(self._deliver, line)
 
     def send(self, line: str) -> None:
         if not self.up:
@@ -139,7 +154,8 @@ class FakeLink:
 
     def __init__(self) -> None:
         self.sent: list[str] = []
-        self._handler: Callable[[str], None] = lambda line: None
+        self._handler: Callable[[str], None] | None = None
+        self._pending: list[str] = []         # lines that arrived before set_handler
         self.ptt = False
         self.hang_s = 2.0
         self._release: asyncio.TimerHandle | None = None

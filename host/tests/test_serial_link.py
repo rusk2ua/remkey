@@ -67,3 +67,26 @@ async def test_lost_and_back():
     link.send("P:0")
     assert opened[-1].tx == b"P:0\n"
     link.close()
+
+
+async def test_keep_boot_passes_the_startup_report():
+    """The telemetry port keeps what the Nano prints right after the reset (its V: and C: lines)."""
+    flushed = []
+
+    class Port(FakePort):
+        def reset_input_buffer(self):
+            flushed.append(True)
+            self.rx.clear()
+
+    port = Port(None, "COM14")
+    port.rx.append(b"V:remtlm 0.4.0 base\nC:ok ch=77 freq_khz=927125\n")
+    lines = []
+    link = SerialLink("COM14", loop=asyncio.get_running_loop(), opener=lambda *a, **k: port,
+                      boot_s=0, keep_boot=True)
+    link.set_handler(lines.append)
+    for _ in range(200):
+        if "C:ok ch=77 freq_khz=927125" in lines:
+            break
+        await asyncio.sleep(0.01)
+    link.close()
+    assert lines[:2] == ["V:remtlm 0.4.0 base", "C:ok ch=77 freq_khz=927125"] and not flushed
