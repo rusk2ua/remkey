@@ -3,6 +3,15 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-18
+
+### Docs
+- `docs/prototype/`: hole-by-hole wiring diagrams for a bench prototype of the shack and
+  supply-box nodes on ElectroCookie mini boards with Nano screw-terminal carriers. Covers
+  the E220 board, the interface boards with the E220 dividers, and the supply-box power
+  board with the polyfuse, buck and INA226. Includes Nano terminal lists, parts and
+  bring-up order.
+
 ## 2026-11-15 (evening)
 
 ### Docs

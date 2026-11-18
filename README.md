@@ -77,7 +77,7 @@ CONTRIBUTING.md, SECURITY.md   how to run the checks; security model and reporti
 
 ## 1. Hardware
 
-Circuit boards for all three nodes (KiCad, with JLCPCB-ready Gerbers) are in [`hardware/`](hardware/README.md).
+Circuit boards for all three nodes (KiCad, with JLCPCB-ready Gerbers) are in [`hardware/`](hardware/README.md). A bench prototype of the shack and supply-box nodes on ElectroCookie boards is in [`docs/prototype/`](docs/prototype/README.md).
 
 ### Parts
 
