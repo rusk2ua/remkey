@@ -141,30 +141,43 @@ class Drawing:
 E220 = ["M0", "M1", "RXD", "TXD", "AUX", "VCC", "GND"]          # rows 2..8, as soldered
 
 
+RIBBON = ["purple", "blue", "green", "yellow", "orange", "red", "gold"]   # M0 .. GND
+
+
 def e220_board():
-    d = Drawing("E220 board (one for the shack, one for the supply box)",
-                "Already built: E220 pins in C2-C8, ribbon header in D2-D8. Add the two capacitors.")
+    d = Drawing("Shack E220 board (as built)",
+                "E220 pins in E10-E16 (M0 at E10), ribbon header in C10-C16. Add the two capacitors.")
     d.board()
-    d.module([f"C{r}" for r in range(2, 9)], "E220", "#2b2b2b")
+    d.module([f"E{r}" for r in range(10, 17)], "", "#2b2b2b")
+    x, y = d.xy("H9")
+    d.el.append(f'<text x="{x}" y="{y + 4}" class="sm" fill="#fff" text-anchor="middle">E220 above, antenna -&gt;</text>')
     for i, n in enumerate(E220):
-        d.pin(f"D{i + 2}", "", "#777")
-        x, y = d.xy(f"A{i + 2}")
-        d.el.append(f'<text x="{x - 60}" y="{y + 5}" class="sm" fill="#222" text-anchor="end">{n}</text>')
-    d.cap("E7", "E8", "100 uF", polar=True)
-    d.cap("B7", "B8", "100 nF")
-    d.note(["Check first: the E220's M0 pin must be in row 2",
-            "and GND in row 8 (labels printed on the module).",
-            "If it's the other way round, tell me and I'll",
-            "flip the diagrams.",
+        d.pin(f"C{i + 10}", "", "#777")
+        x, y = d.xy(f"A{i + 10}")
+        d.el.append(f'<text x="{x - 60}" y="{y + 5}" class="sm" fill="#222" text-anchor="end">{n}  ({RIBBON[i]})</text>')
+    d.cap("A15", "A16", "", polar=True)
+    d.cap("B15", "B16", "")
+    x, y = d.xy("A17")
+    d.el.append(f'<text x="{x - 60}" y="{y + 14}" class="sm" fill="#203a8a" text-anchor="end">100 uF A15(+)-A16</text>')
+    d.el.append(f'<text x="{x - 60}" y="{y + 34}" class="sm" fill="#a0601a" text-anchor="end">100 nF B15-B16</text>')
+    d.note(["Rows 10-16, top to bottom: M0, M1, RXD, TXD, AUX,",
+            "VCC, GND (M0 is the pin at the end next to the",
+            "module's four small holes).",
             "",
-            "Row 7 = VCC (+5 V), row 8 = GND.",
-            "100 uF electrolytic: + lead in E7, - lead in E8.",
-            "100 nF ceramic: B7 to B8.",
+            "Row 15 = VCC (+5 V), row 16 = GND.",
+            "100 uF electrolytic: + lead in A15, - lead in A16.",
+            "100 nF ceramic: B15 to B16.",
             "",
-            "Antenna: straight onto the E220's SMA.",
+            "Ribbon colours (as plugged into C10-C16):",
+            "purple M0, blue M1, green RXD, yellow TXD,",
+            "orange AUX, red VCC, gold GND.",
+            "Check with a meter: red should read the E220's",
+            "VCC pin, gold its GND pin.",
             "",
-            "The ribbon from D2-D8 goes to A2-A8 on the",
-            "interface board, in the same order."])
+            "The other end of the ribbon goes to A2-A8 on the",
+            "interface board: purple in A2 ... gold in A8.",
+            "",
+            "Build the supply box's E220 board the same way."])
     return d
 
 
@@ -172,7 +185,7 @@ def ribbon_and_dividers(d):
     for i, n in enumerate(E220):
         d.pin(f"A{i + 2}", "", "#666")
         x, y = d.xy(f"A{i + 2}")
-        d.el.append(f'<text x="{x - 60}" y="{y + 5}" class="sm" fill="#222" text-anchor="end">ribbon {n}</text>')
+        d.el.append(f'<text x="{x - 60}" y="{y + 5}" class="sm" fill="#222" text-anchor="end">ribbon {n} ({RIBBON[i]})</text>')
     d.resistor("B2", "B8", "2k")
     d.resistor("C3", "C8", "2k")
     d.resistor("D4", "D8", "2k")
@@ -185,8 +198,8 @@ def ribbon_and_dividers(d):
     d.wire("E6", "Nano D6   (E220 AUX)", COL["nano"], lane=-0.5)
 
 
-DIV_NOTE = ["Ribbon pins into A2-A8 in the same order as on the",
-            "E220 board (M0 in A2 ... GND in A8).",
+DIV_NOTE = ["Ribbon pins into A2-A8: purple (M0) in A2, blue A3,",
+            "green A4, yellow A5, orange A6, red (VCC) A7, gold (GND) A8.",
             "",
             "Dividers, 5 V Nano -> 3.3 V E220 (M0, M1, RXD):",
             "  1k standing, across the gap: E2-F2, E3-F3, E4-F4",

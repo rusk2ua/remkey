@@ -11,7 +11,7 @@ A bench prototype of the shack (BASE) and supply-box (PSU) nodes, to run while t
 | Shack | E220 board → ribbon → shack interface board | Screw-terminal carrier, USB from the shack PC |
 | Supply box | E220 board → ribbon → PSU interface board, plus the PSU power board | Screw-terminal carrier, powered from its 5V terminal |
 
-Each E220 board is the one you've already built: E220 pins in C2–C8, ribbon header in D2–D8. The ribbon lands in A2–A8 of the interface board, in the same order.
+The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16; M0 is the pin next to the module's four small holes), ribbon header in C10–C16. Build the supply box's E220 board the same way. The ribbon colours run purple M0, blue M1, green RXD, yellow TXD, orange AUX, red VCC, gold GND. The other end lands in A2–A8 of the interface board in that order: purple in A2 through gold in A8.
 
 **Why there's an interface board:** the E220 uses 3.3 V logic, so the three Nano outputs that drive it (M0, M1, RXD) each need a 1k/2k divider. The 1k has to sit in series between the Nano pin and the E220 pin. On the E220 board each header pin shares a row with its E220 pin, so there's no place for it there.
 
@@ -71,8 +71,8 @@ Each E220 board is the one you've already built: E220 pins in C2–C8, ribbon he
 |---|---|---|
 | 6 (3 per node) | 1 kΩ | Standing, E2–F2, E3–F3, E4–F4 |
 | 6 (3 per node) | 2 kΩ | Lying flat, B2–B8, C3–C8, D4–D8 |
-| 2 (1 per E220 board) | 100 µF electrolytic | E7 (+) to E8 |
-| 2 (1 per E220 board) | 100 nF ceramic | B7 to B8 |
+| 2 (1 per E220 board) | 100 µF electrolytic | A15 (+) to A16 |
+| 2 (1 per E220 board) | 100 nF ceramic | B15 to B16 |
 | 1 | 4.7 kΩ | Standing, I6–I7 (PSU interface) |
 | 1 | Polyfuse, 0.5 A hold | Standing, C11–C13 (PSU power) |
 | 1 | Fixed 5 V buck module | Beside the power board, short wires to its corner pads |
@@ -81,7 +81,7 @@ Each E220 board is the one you've already built: E220 pins in C2–C8, ribbon he
 
 ## Bring-up order
 
-1. **E220 orientation.** Check that M0 is in row 2 and GND in row 8 on the E220 board. If it's reversed, the diagrams need flipping. Ask before wiring.
+1. **E220 board.** Before connecting anything, check with a meter that the red ribbon wire reaches the E220's VCC pin and the gold one its GND pin.
 2. **Shack node.**
    - Wire it up and plug the Nano into the shack PC.
    - Open a serial monitor at 115200 first. It should show `V:remtlm … base` and then `C:ok ch=77 freq_khz=927125`. `C:ok` means the Nano read the E220's configuration through the ribbon and dividers, so that wiring is right. `C:ERR` means check the ribbon order, the dividers, M0/M1, and power on row 7/8.
