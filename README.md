@@ -616,13 +616,28 @@ Afterwards, the Nano finds its module already set and skips the write at boot: n
 
 ### Build and check
 
-1. In the Arduino IDE, install **EByte LoRa E220 library** (Renzo Mischianti), **OneWire** and **DallasTemperature**. CI builds with versions 1.0.8, 2.3.8 and 4.0.6.
+1. In the Arduino IDE, install **EByte LoRa E220 library** (Renzo Mischianti), **OneWire** and **DallasTemperature**. CI builds with versions 1.0.8, 2.3.8 and 4.0.6. With `arduino-cli`, install the same versions:
+
+   ```
+   arduino-cli lib install "EByte LoRa E220 library@1.0.8" "OneWire@2.3.8" "DallasTemperature@4.0.6"
+   ```
+
 2. Open `firmware/remtlm/remtlm.ino`, set `REMTLM_ROLE` in `config.h` (`ROLE_TOWER`, `ROLE_BASE` or `ROLE_PSU`), and upload one image to each Nano. Alternatively, run `pio run -e tower` / `-e base` / `-e psu` from `firmware/remtlm`.
+   - With `arduino-cli` you can leave `config.h` alone and pass the role on the command line instead. `config.h` only sets `ROLE_TOWER` when no role is given, so this leaves nothing to restore in git afterward. For example, for the supply box on COM15:
+
+     ```
+     arduino-cli compile -b arduino:avr:nano:cpu=atmega328 --build-property "compiler.cpp.extra_flags=-DREMTLM_ROLE=ROLE_PSU" firmware/remtlm
+     arduino-cli upload -b arduino:avr:nano:cpu=atmega328 -p COM15 firmware/remtlm
+     ```
+
+   - If the upload fails with `not in sync`, the Nano has the old bootloader: use `cpu=atmega328old` instead.
+   - CH340 Nanos get their COM number from the USB port they're plugged into. FTDI Nanos carry a serial number, so they keep their own COM number in any port.
 3. At boot, each Nano prints `V:remtlm 0.4.0 tower|base|psu`, then `C:ok ch=77 freq_khz=927125`. The first boot also prints `C:written`, since it writes the settings to the module once.
    - `C:ERR read config` means the Nano can't talk to the module: check the M0, M1 and AUX wiring and the module's power.
 4. The tower also prints `I:temperature probes=2` (and `I:INA226 ok` if it has one).
 5. The supply box prints `I:temperature probes=1` and `I:INA226 ok`, then `$RS,...` every 2 s. When it starts hearing the tower it prints `I:tower heard, sending in its gaps`, and from then on each `$RS` follows a tower `$RT`. If the tower goes quiet it prints `I:tower not heard, sending on own timer`.
    - `I:INA226 not found` means the I2C wiring or address is wrong; the Nano keeps working, reports `ok=0`, and retries every 5 s.
+   - To narrow it down, flash `firmware/tools/i2c_check` to the same Nano. It reports the idle state of SDA and SCL, then scans the bus and says whether remtlm would accept what it finds. Both lines should idle HIGH. If one reads LOW with the Nano out of its carrier, measure that pin to GND with power off and compare it with the other one: a healthy A4/A5 reads around 10k or more, while a damaged pin reads a few hundred ohms. A Nano with a damaged pin has to be replaced.
 6. The tower and the supply box echo every packet they send on their own USB port, so you can watch them on the bench:
    - `$RT,...` readings, `$RK,...` transverter replies (the first, about 5 s after boot, is the `v` reply)
    - `$RS,...` supply-box readings

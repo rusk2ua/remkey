@@ -3,6 +3,14 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-20
+
+### Docs
+- README, remtlm "Build and check": the `arduino-cli lib install` line for remtlm's
+  libraries; how to set the role on the `arduino-cli compile` command line instead of
+  editing `config.h`; the `atmega328old` fallback; CH340 vs. FTDI COM numbering; and
+  how to use `i2c_check` to find a Nano with a damaged A4/A5 pin.
+
 ## 2026-11-18 (host 0.8.2)
 
 ### Host
