@@ -1,6 +1,6 @@
 # remtlm prototype on ElectroCookie boards
 
-A bench prototype of the shack (BASE) and supply-box (PSU) nodes, to run while the RK-301/RK-303 boards are on order. It uses ElectroCookie mini solderable breadboards and Nano screw-terminal carriers. The circuit is the same as the real boards (see `hardware/` and the schematics in `docs/img/`).
+A bench prototype of the shack (BASE), supply-box (PSU) and tower-top (TOWER) nodes, to run while the RK-301/302/303 boards are on order. It uses ElectroCookie mini solderable breadboards and Nano screw-terminal carriers. The circuit is the same as the real boards (see `hardware/` and the schematics in `docs/img/`).
 
 **The board layout:** rows 1–17. In each row, holes A–E are joined, and holes F–J are joined separately; the two halves don't connect. Every hole is named the way it's printed on the board (C2 is row 2, column C).
 
@@ -10,6 +10,7 @@ A bench prototype of the shack (BASE) and supply-box (PSU) nodes, to run while t
 |---|---|---|
 | Shack | E220 board → ribbon → shack interface board | Screw-terminal carrier, USB from the shack PC |
 | Supply box | E220 board → ribbon → PSU interface board, plus the PSU power board | Screw-terminal carrier, powered from its 5V terminal |
+| Tower top | One board: E220 in a tall socket, dividers, buck, analog inputs, MKU level shifter, probes | Screw-terminal carrier, powered from its 5V terminal |
 
 The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16; M0 is the pin next to the module's four small holes), ribbon header in C10–C16. Build the supply box's E220 board the same way. The ribbon colors run purple M0, blue M1, green RXD, yellow TXD, orange AUX, red VCC, gold GND. The other end lands in A2–A8 of the interface board in that order: purple in A2 through gold in A8.
 
@@ -30,6 +31,25 @@ The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16;
 ### Supply-box power board
 
 ![PSU power board](proto-psu-power.png?v=2)
+
+### Tower-top board
+
+![Tower-top board](proto-tower-board.png)
+
+Everything for the tower node is on one board, so the build order matters:
+
+1. **Flat parts first, everything under the E220 and the buck:** the 2k and 1k dividers, the jumpers E4–F4, E5–F5, E6–F6, E7–F7, J7–J8, the 100 nF at I6–I7, the 100k at E8–F8, and the Nano wires at J1–J5 (leave them long). Nothing in rows 1–8 may stand taller than a resistor lying flat.
+2. **The underside links** (dashed in the drawing), in insulated wire: G8–D10, B17–C10, G17–C17 (GND) and J6–J16, H16–J13 (+5 V).
+3. **The buck** on foam tape over F1–J7, with short wires from its pads: OUT+ to G6, OUT− to G7, IN− to H7, and IN+ to G12 (insulated; it runs down to row 12).
+4. **The E220 socket** in A1–A7: M0 in A1 … GND in A7, so M0 (the pin next to the module's four small holes) is at row 1 and the module lies over the board, with its SMA end past the J edge. The socket has to hold the module above the buck: measure the buck's height plus the foam tape, and use a socket at least 1–2 mm taller. If one 8.5 mm female header isn't enough, stack two.
+5. **The rest, rows 9–17:** standing parts are fine here.
+   - PA sense: 10k E9–F9, 22k G9–G10, 100 nF H9–H10.
+   - MON: 10k E11–F11, 22k I11–I10, 100 nF J11–J10.
+   - Jumper E10–F10, so row 10 is GND on both halves.
+   - PTC standing E12–F12; 4.7k E13–F13; 100 µF I16 (+) to I17.
+6. **The BSS138 shifter** in a 1x4 socket at D14–D17 (LV1, LV2, LV, GND) and another at F14–F17 (HV1, HV2, HV, GND). Its unused LV3/LV4 end hangs past row 17; with the module raised on sockets, those pins clear the board. Go by the labels printed on the module: LV1 at D14 and HV1 at F14. That works with only one side of the module facing up, and either side is fine electrically.
+
+The level shifter's low side takes its 3.3 V from the Nano's 3V3 pin (A16). It draws only microamps there.
 
 ## Nano screw terminals
 
@@ -56,6 +76,40 @@ The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16;
 | 5V | Interface G7 | +5 V bus (powers the Nano; don't use VIN) |
 | GND | Interface G8 | GND bus |
 
+**Tower-top Nano** (TOWER firmware):
+
+| Terminal | Goes to | Signal |
+|---|---|---|
+| D9 | J1 | M0 (through 1k/2k) |
+| D10 | J2 | M1 (through 1k/2k) |
+| D8 | J3 | to E220 RXD (through 1k/2k) |
+| D7 | J4 | from E220 TXD |
+| D6 | J5 | E220 AUX |
+| D5 | C13 | DS18B20 DQ |
+| A0 | J9 | PA power sense (after the 10k/22k divider) |
+| A1 | G11 | MKU MON (after the 10k/22k divider) |
+| A2 | B8 | MKU LD (100k pull-down) |
+| D11 | J14 | from MKU TXD (through the shifter) |
+| D12 | J15 | to MKU RXD (through the shifter) |
+| 3V3 | A16 | Level shifter LV |
+| 5V | G16 | +5 V from the buck (powers the Nano; don't use VIN) |
+| GND | I8 | GND |
+
+**Off-board wires, tower top (left edge):**
+
+| Hole | Wire |
+|---|---|
+| A12 | +13.8 V in (through the PTC to the buck) |
+| A17 | Supply GND in |
+| A9 | PA power sense |
+| B10 | PA GND |
+| A14 | MKU CON1 pin 11 (TXD) |
+| A15 | MKU CON1 pin 12 (RXD) |
+| A8 | MKU CON1 pin 16 (LD) |
+| A11 | MKU CON1 pin 9 (MON) |
+| A10 | MKU CON1 pin 15 (GND) |
+| A13, B13 | DS18B20 probes, yellow (DQ). Red to G13 and H13, black to H17 and J17 |
+
 **Between the supply-box boards:** power board J9 (+5 V) → interface H7, and power board J8 (GND) → interface H8.
 
 **Off-board wires, supply box:**
@@ -78,6 +132,19 @@ The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16;
 | 1 | Fixed 5 V buck module | On foam tape over the empty right half of the power board (rows 11–16), short insulated wires from its corner pads to A13, B15, C15, A17. Don't solder its pads into the holes: the row strips would short IN+ to OUT+ |
 | 1 | INA226 module (R100 removed) | Header in F2–F9 of the power board |
 | 1 | DS18B20 probe | PSU interface board |
+| 3 | 1 kΩ | Tower: flat across the gap, E1–F1, E2–F2, E3–F3 |
+| 3 | 2 kΩ | Tower: flat, B1–B7, C2–C7, D3–D7 |
+| 2 | 10 kΩ | Tower: E9–F9 (PA), E11–F11 (MON) |
+| 2 | 22 kΩ | Tower: G9–G10, I11–I10 |
+| 1 | 100 kΩ | Tower: flat, E8–F8 (LD pull-down) |
+| 1 | 4.7 kΩ | Tower: E13–F13 (DS18B20 pull-up) |
+| 3 | 100 nF ceramic | Tower: I6–I7 (flat, E220), H9–H10, J11–J10 |
+| 1 | 100 µF electrolytic | Tower: I16 (+) to I17 |
+| 1 | Polyfuse, 0.5 A hold | Tower: standing, E12–F12 |
+| 1 | Fixed 5 V buck module | Tower: foam tape over F1–J7, under the E220 |
+| 1 | Tall 1x7 female header (or two stacked) | Tower: A1–A7, for the E220 |
+| 1 | BSS138 4-channel level shifter | Tower: two 1x4 sockets, D14–D17 and F14–F17 |
+| 2 | DS18B20 probes | Tower: PA heatsink, transverter case |
 
 ## Bring-up order
 
@@ -98,6 +165,11 @@ The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16;
      - `I:INA226 ok`
      - `I:temperature probes=1`
    - After that, a `$RS` line every 2 s with voltage, current (about zero with no load through the shunt) and box temperature. The PSU node echoes what it transmits to USB for bench work.
-5. **Over the air.** With both nodes running, the shack dashboard and the cloud summary page show the supply box's readings within a few seconds.
+5. **Tower-top board on its own.**
+   - Bench supply at 13.8 V, current-limited to about 200 mA, into A12 and A17, with no E220, no shifter and no Nano.
+   - Check 5 V on row 16 (right half). The shifter's 3.3 V comes from the Nano, so there's nothing to check there yet.
+   - Then plug in the shifter, the E220 (antenna or dummy load on it) and the Nano.
+6. **Tower-top Nano.** Expect `V:remtlm … tower`, then `C:written` once and `C:ok ch=77 …`, `I:temperature probes=2` (fewer if they're not connected), a `$RT` line every 2 s, and `$RK` lines from the MKU poll.
+7. **Over the air.** With the nodes running, the shack dashboard and the cloud summary page show their readings within a few seconds. With the tower running, the supply box sends its `$RS` in the tower's gaps (`I:tower heard`).
 
 Regenerate the drawings: `python3 docs/prototype/make_proto.py docs/prototype`, then convert each SVG to PNG.

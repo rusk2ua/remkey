@@ -3,6 +3,16 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-20 (tower prototype)
+
+### Docs
+- `docs/prototype/`: a one-board ElectroCookie layout for the tower-top node
+  (`proto-tower-board`): the E220 in a tall socket lying over rows 1-8 with the buck
+  on foam tape under it, the PA/MON/LD inputs, the MKU level shifter (3.3 V side from
+  the Nano's 3V3 pin), two DS18B20s and the PTC. `make_proto.py` now checks the
+  layout: every hole used once, one net per strip. README: build order, Nano and
+  field-wire tables, parts, and bring-up steps.
+
 ## 2026-11-20 (remtlm 0.5.0, host 0.9.0)
 
 ### remtlm firmware

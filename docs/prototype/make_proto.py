@@ -316,9 +316,212 @@ def psu_power_board():
     return d
 
 
+# ---------------------------------------------------------------------------
+# Tower-top board: everything on one board. The E220 plugs into a tall 1x7 socket
+# in A1-A7 and lies flat over rows 1-8; the buck rides on foam tape under it, over
+# the right half of rows 1-7. Field wiring leaves the left edge, Nano wiring the right.
+# ---------------------------------------------------------------------------
+class Netcheck:
+    """Every hole used once; every strip (row, half) carries one net."""
+
+    def __init__(self):
+        self.holes, self.strips = {}, {}
+
+    def use(self, hole, net, what):
+        assert hole not in self.holes, f"{hole} used twice: {self.holes[hole]} and {what}"
+        self.holes[hole] = what
+        key = (int(hole[1:]), "L" if hole[0] in "ABCDE" else "R")
+        old = self.strips.setdefault(key, net)
+        assert old == net, f"strip {key}: {old} vs {net} ({what} at {hole})"
+
+
+TOWER_STRIPS = {
+    (1, "L"): "M0_E", (2, "L"): "M1_E", (3, "L"): "RXD_E", (4, "L"): "TXD", (5, "L"): "AUX",
+    (6, "L"): "5V", (7, "L"): "GND",
+    (1, "R"): "M0_N", (2, "R"): "M1_N", (3, "R"): "RXD_N", (4, "R"): "TXD", (5, "R"): "AUX",
+    (6, "R"): "5V", (7, "R"): "GND",
+    (8, "L"): "LD", (8, "R"): "GND", (9, "L"): "PA_SENSE", (9, "R"): "A0",
+    (10, "L"): "GND", (10, "R"): "GND", (11, "L"): "MON", (11, "R"): "A1",
+    (12, "L"): "VIN", (12, "R"): "VFUSED", (13, "L"): "DQ", (13, "R"): "5V",
+    (14, "L"): "XV_TXD", (15, "L"): "XV_RXD", (16, "L"): "3V3", (17, "L"): "GND",
+    (14, "R"): "XV_RX", (15, "R"): "XV_TX", (16, "R"): "5V", (17, "R"): "GND",
+}
+
+
+def tower_board():
+    d = Drawing("Tower-top board (TOWER): one ElectroCookie mini + the Nano carrier",
+                "E220 in a tall socket at A1-A7, lying flat over rows 1-8; buck on foam tape under it. "
+                "Field wires and three Nano wires leave the left edge; the other Nano wires leave the right.", width=1700)
+    d.board()
+    nc = Netcheck()
+
+    def net(h):
+        return TOWER_STRIPS[(int(h[1:]), "L" if h[0] in "ABCDE" else "R")]
+
+    def two(a, b, what):
+        nc.use(a, net(a), what)
+        nc.use(b, net(b), what)
+
+    # E220 socket and dividers
+    for i, n in enumerate(E220):
+        h = f"A{i + 1}"
+        nc.use(h, net(h), f"E220 {n}")
+        d.pin(h, "", "#111")
+        x, y = d.xy(h)
+        d.el.append(f'<text x="{x + 11}" y="{y - 7}" class="tiny" fill="#fff">{n}</text>')
+    for a, b in (("B1", "B7"), ("C2", "C7"), ("D3", "D7")):
+        two(a, b, "2k")
+        d.resistor(a, b, "2k")
+    for r in (1, 2, 3):
+        two(f"E{r}", f"F{r}", "1k")
+        d.resistor(f"E{r}", f"F{r}", "1k")
+    for r, c in ((4, COL["nano"]), (5, COL["nano"]), (6, COL["5v"]), (7, COL["gnd"])):
+        two(f"E{r}", f"F{r}", "bus jumper")
+        d.jumper(f"E{r}", f"F{r}", c)
+    two("I6", "I7", "100nF E220")
+    d.cap("I6", "I7", "100n")
+    two("J7", "J8", "jumper")
+    d.jumper("J7", "J8", COL["gnd"])
+
+    # buck pads (it sits on foam tape over F1-J7, under the E220)
+    for h, lab, c in (("G6", "OUT+", COL["5v"]), ("G7", "OUT-", COL["gnd"]), ("H7", "IN-", COL["gnd"])):
+        nc.use(h, net(h), f"buck {lab}")
+        d.pin(h, "", c)
+    nc.use("G12", net("G12"), "buck IN+")
+    d.pin("G12", "", COL["14v"])
+
+    # analog inputs
+    two("E8", "F8", "100k LD pull-down")
+    d.resistor("E8", "F8", "100k")
+    two("E9", "F9", "10k PA")
+    d.resistor("E9", "F9", "", standing=True)
+    two("G9", "G10", "22k A0")
+    d.resistor("G9", "G10", "", standing=True)
+    two("H9", "H10", "100nF A0")
+    d.cap("H9", "H10", "")
+    two("E10", "F10", "GND jumper")
+    d.jumper("E10", "F10", COL["gnd"])
+    two("E11", "F11", "10k MON")
+    d.resistor("E11", "F11", "", standing=True)
+    two("I11", "I10", "22k A1")
+    d.resistor("I11", "I10", "", standing=True)
+    two("J11", "J10", "100nF A1")
+    d.cap("J11", "J10", "")
+
+    # power, DS18B20, 100 uF
+    two("E12", "F12", "PTC")
+    d.resistor("E12", "F12", "", color="#c9a400", standing=True)
+    two("E13", "F13", "4.7k DQ pull-up")
+    d.resistor("E13", "F13", "", standing=True)
+    two("I16", "I17", "100uF")
+    d.cap("I16", "I17", "", polar=True)
+
+    # BSS138 module in a socket: LV pins in D14-D17, HV pins in F14-F17; LV3/LV4 end hangs past row 17
+    for r, lv, hv in ((14, "LV1", "HV1"), (15, "LV2", "HV2"), (16, "LV", "HV"), (17, "GND", "GND")):
+        nc.use(f"D{r}", net(f"D{r}"), f"BSS138 {lv}")
+        nc.use(f"F{r}", net(f"F{r}"), f"BSS138 {hv}")
+    x0, y0 = d.xy("D14")
+    x1, _ = d.xy("F14")
+    y1 = d.xy("F17")[1] + 2 * U
+    d.el.append(f'<rect x="{x0 - 14}" y="{y0 - 14}" width="{x1 - x0 + 28}" height="{y1 - y0 + 28}" rx="4" '
+                'fill="#0b5d3b" opacity="0.8" stroke="#fff" stroke-dasharray="5,4"/>')
+    for r, lv, hv in ((14, "LV1", "HV1"), (15, "LV2", "HV2"), (16, "LV", "HV"), (17, "GND", "GND")):
+        d.pin(f"D{r}", "", "#0d3")
+        d.pin(f"F{r}", "", "#0d3")
+        x, y = d.xy(f"E{r}")
+        d.el.append(f'<text x="{x}" y="{y + 4}" class="tiny" fill="#fff" text-anchor="middle">{lv}|{hv}</text>')
+    d.el.append(f'<text x="{(x0 + x1) / 2}" y="{y1 + 4}" class="tiny" fill="#fff" text-anchor="middle">LV3/LV4 off board</text>')
+
+    # links on the underside (insulated)
+    def under(a, b, color):
+        two(a, b, "underside link")
+        (xa, ya), (xb, yb) = d.xy(a), d.xy(b)
+        d.el.append(f'<line x1="{xa}" y1="{ya}" x2="{xb}" y2="{yb}" stroke="{color}" stroke-width="3" '
+                    'stroke-dasharray="7,5" opacity="0.9"/>')
+        for x, y in ((xa, ya), (xb, yb)):
+            d.el.append(f'<circle cx="{x}" cy="{y}" r="5" fill="none" stroke="{color}" stroke-width="2"/>')
+    under("G8", "D10", COL["gnd"])
+    under("B17", "C10", COL["gnd"])
+    under("G17", "C17", COL["gnd"])
+    under("J6", "J16", COL["5v"])
+    under("H16", "J13", COL["5v"])
+
+    # field wires, left edge
+    left = [("A8", "MKU CON1 16  LD", COL["sense"]), ("B8", None, None),
+            ("A9", "PA power sense", COL["sense"]), ("A10", "MKU CON1 15  GND", COL["gnd"]),
+            ("B10", "PA GND", COL["gnd"]), ("A11", "MKU CON1 9  MON", COL["sense"]),
+            ("A12", "+13.8 V in", COL["14v"]), ("A13", "probe 1 DQ (yellow)", COL["probe"]),
+            ("B13", "probe 2 DQ (yellow)", COL["probe"]), ("A14", "MKU CON1 11  TXD", COL["sense"]),
+            ("A15", "MKU CON1 12  RXD", COL["sense"]), ("A17", "supply GND in", COL["gnd"])]
+    for h, lab, c in left:
+        if lab is None:
+            continue
+        nc.use(h, net(h), lab)
+        d.wire(h, lab, c, "l", lane=-0.5 if h[0] == "B" else 0.0)
+    # Nano wires, right edge
+    right = [("J1", "Nano D9   (M0)"), ("J2", "Nano D10  (M1)"), ("J3", "Nano D8   (to RXD)"),
+             ("J4", "Nano D7   (from TXD)"), ("J5", "Nano D6   (AUX)"), ("I8", "Nano GND"),
+             ("J9", "Nano A0   (PA)"), ("G11", "Nano A1   (MON)"), ("J14", "Nano D11  (MKU RX)"),
+             ("J15", "Nano D12  (MKU TX)"), ("G16", "Nano 5V")]
+    for h, lab in right:
+        nc.use(h, net(h), lab)
+        c = COL["5v"] if "5V" in lab else COL["gnd"] if "GND" in lab else COL["nano"]
+        d.wire(h, lab, c, "r", lane=0.0 if h[0] == "J" else -0.5)
+    for h, lab, lane in (("B8", "Nano A2  (LD)", 0.5), ("C13", "Nano D5  (DS18B20)", 0.5),
+                         ("A16", "Nano 3V3  (shifter LV)", 0.0)):
+        nc.use(h, net(h), lab)
+        d.wire(h, lab, COL["nano"], "l", lane=lane)
+    # probe power on the right half
+    for h, lab, c in (("G13", "probe 1 red", COL["5v"]), ("H13", "probe 2 red", COL["5v"]),
+                      ("H17", "probe 1 black", COL["gnd"]), ("J17", "probe 2 black", COL["gnd"])):
+        nc.use(h, net(h), lab)
+        d.wire(h, lab, c, "r", lane=0.0 if h[0] == "J" else 0.5)
+
+    # outlines: E220 over rows 1-8 and past the right edge; buck over F1-J7
+    xa, ya = d.xy("A1")
+    xj, y8 = d.xy("J8")
+    d.el.append(f'<rect x="{xa - 10}" y="{ya - 30}" width="{xj - xa + 70}" height="{y8 - ya + 34}" rx="6" '
+                'fill="none" stroke="#ffd54f" stroke-width="3" stroke-dasharray="10,6"/>')
+    d.el.append(f'<text x="{xa - 30}" y="{ya - 64}" class="sm" fill="#b8860b">E220 outline (above, on the tall socket); SMA end -&gt;</text>')
+    xf, yf = d.xy("F1")
+    xj7, yj7 = d.xy("J7")
+    d.el.append(f'<rect x="{xf - 12}" y="{yf - 14}" width="{xj7 - xf + 24}" height="{yj7 - yf + 28}" rx="4" '
+                'fill="none" stroke="#9be7ff" stroke-width="3" stroke-dasharray="4,4"/>')
+    d.el.append(f'<text x="{(xf + xj7) / 2}" y="{(yf + yj7) / 2 + 6}" class="sm" fill="#9be7ff" text-anchor="middle">buck</text>')
+
+    d.note(["E220: tall 1x7 socket in A1-A7 (M0 in A1 ... GND in A7,",
+            "  M0 = pin next to the module's four small holes). The module",
+            "  lies flat over rows 1-8; only flat parts go under it.",
+            "Dividers: 2k flat B1-B7, C2-C7, D3-D7; 1k flat across the",
+            "  gap E1-F1, E2-F2, E3-F3. Jumpers E4-F4 (TXD), E5-F5 (AUX),",
+            "  E6-F6 (+5 V), E7-F7 (GND), J7-J8 (GND). 100 nF flat I6-I7.",
+            "Buck: foam tape over F1-J7, under the E220. Short wires:",
+            "  OUT+ G6, OUT- G7, IN- H7, IN+ G12. Solder everything under",
+            "  it first, and leave the wire ends at J1-J5 long.",
+            "Analog: PA sense -> A9, 10k E9-F9, 22k G9-G10, 100 nF H9-H10.",
+            "  MON -> A11, 10k E11-F11, 22k I11-I10, 100 nF J11-J10.",
+            "  LD -> A8, 100k flat E8-F8 (row 8 is under the E220 edge).",
+            "  Row 10 is GND, both halves (jumper E10-F10).",
+            "Power: +13.8 V -> A12, PTC standing E12-F12, G12 -> buck IN+.",
+            "  Supply GND -> A17. 100 uF I16 (+) to I17.",
+            "DS18B20 x2: DQ A13, B13; red G13, H13; black H17, J17.",
+            "  4.7k E13-F13 (row 13 right is +5 V).",
+            "BSS138 shifter in a socket cut to 2 x 4: LV1 D14, LV2 D15,",
+            "  LV D16, GND D17; HV1 F14 ... GND F17. Its LV3/LV4 end",
+            "  hangs past row 17 (no holes there).",
+            "Dashed lines: insulated wire on the underside:",
+            "  G8-D10, B17-C10, G17-C17 (GND); J6-J16, H16-J13 (+5 V)."],
+           x=d.x0 + 11 * U + 400, y=d.y0 - 20)
+    used = len(nc.holes)
+    return d, used
+
+
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else "."
     for name, fn in (("proto-e220-board", e220_board), ("proto-shack-interface", shack_board),
                      ("proto-psu-interface", psu_interface_board), ("proto-psu-power", psu_power_board)):
         open(f"{out}/{name}.svg", "w").write(fn().svg())
         print(name)
+    d, used = tower_board()
+    open(f"{out}/proto-tower-board.svg", "w").write(d.svg())
+    print(f"proto-tower-board ({used} holes)")
