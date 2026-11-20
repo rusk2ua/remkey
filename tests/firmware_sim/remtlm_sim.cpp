@@ -80,7 +80,8 @@ static void testPsu() {
   ina.shunt = 1600;     // 4.0 mV across 3.75 mOhm = 1066 mA
   dallas.count = 1;
   boot();
-  CHECK(Serial.out.find("V:remtlm 0.4.0 psu") != std::string::npos, "version line: %s", Serial.out.c_str());
+  CHECK(Serial.out.find("V:remtlm 0.5.0 psu") != std::string::npos, "version line: %s", Serial.out.c_str());
+  CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_DISABLED, "psu keeps the RSSI byte off");
   CHECK(Serial.out.find("I:INA226 ok") != std::string::npos, "INA226 found");
 
   // 1. No tower: free-running every PSU_REPORT_MS
@@ -183,7 +184,8 @@ static void testTower() {
   ina.shunt = 2400;     // 6 mV -> 1600 mA
   dallas.count = 2;
   boot();
-  CHECK(Serial.out.find("V:remtlm 0.4.0 tower") != std::string::npos, "version line");
+  CHECK(Serial.out.find("V:remtlm 0.5.0 tower") != std::string::npos, "version line");
+  CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_DISABLED, "tower keeps the RSSI byte off");
   CHECK(Serial.out.find("I:temperature probes=2") != std::string::npos, "two probes");
   run(4600);
   // the mock ADC reads mid-scale (~3.6 V PA sense), so the tower is in its 0.5 s "transmitting" rate
@@ -206,6 +208,11 @@ static void testTower() {
 #endif
 
 #if REMTLM_ROLE == ROLE_BASE
+// Run until the base sends something on the LoRa port (the noise query), at most ms.
+static void runUntilSent(uint32_t ms) {
+  for (uint32_t i = 0; i < ms && loraSerial.out.empty(); i++) step();
+}
+
 static void testBase() {
   std::printf("base\n");
   boot();
@@ -223,6 +230,49 @@ static void testBase() {
   CHECK(Serial.out.find(rs.substr(0, rs.size() - 2)) != std::string::npos, "$RS forwarded: %s", Serial.out.c_str());
   CHECK(Serial.out.find("E:bad packet #1") != std::string::npos, "bad packet counted");
   CHECK(loraSerial.out.empty(), "base never transmits");
+  CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_ENABLED, "base turns on the RSSI byte");
+  CHECK(e220.cfg.OPTION.RSSIAmbientNoise == RSSI_AMBIENT_NOISE_ENABLED, "base turns on the noise register");
+
+  // An RSSI byte after each packet: dBm = -(256 - byte). It names the packet's sender.
+  Serial.out.clear();
+  loraSerial.feed(rtLine(3) + std::string(1, (char)0x9C) + rs + std::string(1, (char)0xC1));
+  run(20);
+  size_t rt3 = Serial.out.find("$RT,3,"), r1 = Serial.out.find("R:tower,-100");
+  size_t rsAt = Serial.out.find("$RS,5,"), r2 = Serial.out.find("R:psu,-63");
+  CHECK(rt3 != std::string::npos && r1 != std::string::npos && r1 > rt3, "R:tower after its $RT: %s", Serial.out.c_str());
+  CHECK(rsAt != std::string::npos && r2 != std::string::npos && r2 > rsAt, "R:psu after its $RS: %s", Serial.out.c_str());
+  // No R: for a packet that failed its checksum: we can't tell who sent it.
+  Serial.out.clear();
+  loraSerial.feed(bad + std::string(1, (char)0xA0));
+  run(20);
+  CHECK(Serial.out.find("R:") == std::string::npos, "no R: after a bad packet: %s", Serial.out.c_str());
+
+  // Noise floor: after NOISE_POLL_MS, once the link is quiet, the base sends
+  // C0 C1 C2 C3 00 01 and prints the reply's value.
+  Serial.out.clear();
+  loraSerial.out.clear();
+  runUntilSent(NOISE_POLL_MS + NOISE_QUIET_MS + 10);
+  const std::string q("\xC0\xC1\xC2\xC3\x00\x01", 6);
+  CHECK(loraSerial.out == q, "noise query sent once (%zu bytes)", loraSerial.out.size());
+  loraSerial.feed(std::string("\xC1\x00\x01\x90", 4));
+  run(5);
+  CHECK(Serial.out.find("N:-112") != std::string::npos, "noise printed: %s", Serial.out.c_str());
+  // A packet arriving during a query still gets its RSSI, even a 0xC1 one, and
+  // the noise reply after it is still read.
+  Serial.out.clear();
+  loraSerial.out.clear();
+  runUntilSent(NOISE_POLL_MS + NOISE_QUIET_MS + 10);
+  CHECK(loraSerial.out == q, "second noise query");
+  loraSerial.feed(rs + std::string("\xC1\xC1\x00\x01\x9A", 5));
+  run(10);
+  CHECK(Serial.out.find("R:psu,-63") != std::string::npos, "RSSI during a query: %s", Serial.out.c_str());
+  CHECK(Serial.out.find("N:-102") != std::string::npos, "noise after that packet: %s", Serial.out.c_str());
+  // No reply: the query times out and the next one goes out on schedule.
+  loraSerial.out.clear();
+  runUntilSent(NOISE_POLL_MS + NOISE_QUIET_MS + 10);
+  CHECK(loraSerial.out == q, "query after a timeout");
+  run(NOISE_REPLY_MS + 5);
+  CHECK(nzState == 0, "timed-out query cleared");
 }
 #endif
 
