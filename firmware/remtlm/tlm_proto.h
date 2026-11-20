@@ -42,6 +42,13 @@
 //   text       reply text; line breaks become '|', and '$', '*' and ',' become ' '
 //
 // HH is the XOR of every byte between '$' and '*', two upper-case hex digits.
+//
+// The base also prints status lines of its own on USB (never sent over the air):
+//   V:remtlm <version> base     at boot
+//   C:ok ch=77 freq_khz=927125  (or C:written first, or C:ERR ...) LoRa configuration
+//   E:bad packet #<n>           a packet that failed its checksum
+//   R:tower,<dBm> / R:psu,<dBm> signal strength of the packet just received (0.5.0+)
+//   N:<dBm>                     channel noise floor, every 10 s (0.5.0+)
 // Plain ASCII, no encryption: legal under Part 15 and Part 97 alike.
 #pragma once
 #include <stdint.h>

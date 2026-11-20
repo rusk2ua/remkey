@@ -218,3 +218,22 @@ async def test_summary_reports_the_shack_receiver():
     assert "disconnected" in page
     svc.tlm.on_line(BACK)
     assert svc.tlm.base_up
+
+
+async def test_summary_reports_signal_strength_and_noise():
+    svc = service()
+    s3, clock = FakeS3(), Clock()
+    up = CloudUploader(svc, client_factory=lambda: s3, clock=clock)
+    await up.tick()
+    page = next(p["Body"] for p in s3.puts if p["Key"] == "data/summary.html").decode()
+    assert "Noise floor at shack" not in page        # no reports yet (older base firmware)
+
+    for ln in ("R:tower,-88", "R:psu,-95", "N:-115"):
+        svc.tlm.on_line(ln)
+    assert not any("R:" in a["msg"] or "N:" in a["msg"] for a in svc.tlm.alerts)
+    clock.t += 61
+    await up.tick()
+    page = [p["Body"] for p in s3.puts if p["Key"] == "data/summary.html"][-1].decode()
+    assert "Tower-top signal at shack" in page and "-88 dBm" in page and "27 dB over noise" in page
+    assert "Supply box signal at shack" in page and "20 dB over noise" in page
+    assert "Noise floor at shack" in page and "-115 dBm" in page

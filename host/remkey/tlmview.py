@@ -23,6 +23,7 @@ from .telemetry import (
     ReplyAssembler,
     ReplyPart,
     parse_any,
+    parse_signal,
 )
 
 
@@ -81,7 +82,12 @@ def main(argv: list[str] | None = None) -> int:
                       f" (min {q.i_min:6.3f} max {q.i_max:6.3f}){extra}")
                 continue
             if not isinstance(p, Packet):
-                if line:
+                sig = parse_signal(line)
+                if sig is not None:
+                    src, dbm = sig
+                    what = {"tower": "tower signal", "psu": "BASE supply signal", "noise": "noise floor"}[src]
+                    print(f"{time.strftime('%H:%M:%S')}        {what} {dbm} dBm")
+                elif line:
                     print(f"   {line}")
                 continue
             stats.update(p)

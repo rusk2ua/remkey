@@ -3,7 +3,23 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
-## 2026-11-20
+## 2026-11-20 (remtlm 0.5.0, host 0.9.0)
+
+### remtlm firmware
+- The base reports signal strength. Its E220 now adds an RSSI byte to every packet
+  it receives; the base prints it as `R:tower,<dBm>` or `R:psu,<dBm>` after the
+  packet. Every 10 s, between packets, it also reads the module's noise-floor
+  register and prints `N:<dBm>`. The first boot after the update rewrites the
+  module's settings once (`C:written`). Tower and supply-box behavior is unchanged,
+  so only the base Nano needs the new firmware.
+
+### Host
+- The station collects the `R:` and `N:` lines. The dashboard's tower and supply-box
+  cards show "Signal at shack": latest RSSI, 5-minute average and worst case, and
+  the margin over the noise floor (a warning below 10 dB). The cloud summary and
+  `tlmview` show the same.
+
+## 2026-11-20 (docs)
 
 ### Docs
 - README, remtlm "Build and check": the `arduino-cli lib install` line for remtlm's

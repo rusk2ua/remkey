@@ -24,6 +24,8 @@
 // BASE role (Nano in the radio room, USB to the shack PC):
 //   - forwards every valid packet (from the tower and the PSU box) to USB serial, unchanged
 //   - prints "V:..." at boot and "C:..." with the LoRa configuration result
+//   - after each packet, prints its signal strength: "R:tower,<dBm>" or "R:psu,<dBm>"
+//   - every 10 s, between packets, reads the channel's noise floor: "N:<dBm>"
 //
 // Libraries (Arduino Library Manager):
 //   "EByte LoRa E220 library" by Renzo Mischianti   (all roles)
@@ -50,7 +52,7 @@
 #include <Wire.h>
 #endif
 
-#define FW_VERSION "0.4.0"
+#define FW_VERSION "0.5.0"
 
 SoftwareSerial loraSerial(PIN_E220_TXD, PIN_E220_RXD);   // (rx, tx) from the Nano's side
 LoRa_E220 e220(&loraSerial, PIN_E220_AUX, PIN_E220_M0, PIN_E220_M1);
@@ -77,9 +79,16 @@ static bool configureLora() {
   want.SPED.airDataRate = LORA_AIR_RATE;
   want.SPED.uartParity = MODE_00_8N1;
   want.OPTION.subPacketSetting = SPS_200_00;
+#if REMTLM_ROLE == ROLE_BASE
+  // The base reports signal strength: an RSSI byte after every received packet,
+  // and the noise-floor register on request (C0 C1 C2 C3 in normal mode).
+  want.OPTION.RSSIAmbientNoise = RSSI_AMBIENT_NOISE_ENABLED;
+  want.TRANSMISSION_MODE.enableRSSI = RSSI_ENABLED;
+#else
   want.OPTION.RSSIAmbientNoise = RSSI_AMBIENT_NOISE_DISABLED;
-  want.OPTION.transmissionPower = LORA_TX_POWER;
   want.TRANSMISSION_MODE.enableRSSI = RSSI_DISABLED;
+#endif
+  want.OPTION.transmissionPower = LORA_TX_POWER;
   want.TRANSMISSION_MODE.fixedTransmission = FT_TRANSPARENT_TRANSMISSION;
   want.TRANSMISSION_MODE.enableLBT = LBT_DISABLED;
   want.TRANSMISSION_MODE.WORPeriod = WOR_2000_011;
@@ -295,9 +304,62 @@ static char rxLine[TLM_RK_LINE + 8];
 static uint8_t rxLen = 0;
 static uint16_t rxBad = 0;
 
+#if REMTLM_ROLE == ROLE_BASE
+// Signal strength. With RSSI enabled, the E220 sends one extra byte after each
+// received packet: dBm = -(256 - byte). Packets are plain ASCII, so a byte >= 0x80
+// between lines is always that RSSI byte. It belongs to the packet whose last line
+// just ended; rxTag remembers that line's type ("RT", "RS", ...).
+static char rxTag[3] = "";
+static int16_t rxRssiDbm = 0;
+static bool rxRssiNew = false;
+static char rxRssiTag[3] = "";
+static uint32_t rxLastByte = 0;
+// Noise-floor query: C0 C1 C2 C3 00 01 reads register 0 (current ambient noise);
+// the reply is C1 00 01 <value>. nzState follows that reply: 1 = waiting for C1,
+// 2 = expecting 00, 3 = expecting 01, 4 = expecting the value.
+static uint8_t nzState = 0;
+static int16_t nzDbm = 0;
+static bool nzNew = false;
+
+static void takeRssi(uint8_t b) {
+  if (rxTag[0]) {
+    rxRssiDbm = -(int16_t)(256 - b);
+    memcpy(rxRssiTag, rxTag, sizeof(rxTag));
+    rxRssiNew = true;
+  }
+  rxTag[0] = 0;              // one RSSI byte per packet
+}
+#endif
+
 static const char *loraReadLine() {
   while (loraSerial.available() > 0) {
     char c = (char)loraSerial.read();
+#if REMTLM_ROLE == ROLE_BASE
+    uint8_t b = (uint8_t)c;
+    rxLastByte = millis();
+    if (nzState && rxLen == 0) {
+      if (nzState == 1 && b == 0xC1) { nzState = 2; continue; }
+      if (nzState == 2) {
+        if (b == 0x00) { nzState = 3; continue; }
+        takeRssi(0xC1);      // that C1 was a packet's RSSI byte after all
+        if (b == 0xC1) continue;   // and this one may start the reply: stay in 2
+        nzState = 1;
+      } else if (nzState == 3) {
+        if (b == 0x01) { nzState = 4; continue; }
+        nzState = 0;         // not a noise reply: give up on this query
+      } else if (nzState == 4) {
+        nzDbm = -(int16_t)(256 - b);
+        nzNew = true;
+        nzState = 0;
+        continue;
+      }
+    }
+    if (rxLen == 0 && b >= 0x80) {
+      takeRssi(b);
+      if (rxRssiNew) return nullptr;   // let loop() print it before the next packet
+      continue;
+    }
+#endif
     if (c == '\r') continue;
     if (c == '$') {                // start of packet: resync
       rxLen = 0;
@@ -308,7 +370,17 @@ static const char *loraReadLine() {
     if (c == '\n') {
       rxLine[rxLen] = 0;
       rxLen = 0;
-      if (tlmValid(rxLine)) return rxLine;
+      if (tlmValid(rxLine)) {
+#if REMTLM_ROLE == ROLE_BASE
+        rxTag[0] = rxLine[1];
+        rxTag[1] = rxLine[2];
+        rxTag[2] = 0;
+#endif
+        return rxLine;
+      }
+#if REMTLM_ROLE == ROLE_BASE
+      rxTag[0] = 0;          // can't tell whose packet it was
+#endif
       rxBad++;
       return nullptr;
     }
@@ -594,21 +666,56 @@ void loop() {
 // ===========================================================================
 // BASE
 // ===========================================================================
+static bool loraOk = false;
+static uint32_t nzNext = 0, nzT0 = 0;
+
+// Ask for the noise floor only between packets: the link has been quiet for a
+// while, no line is half received, and the module is idle.
+static void serviceNoise(uint32_t now) {
+  if (nzState) {
+    if (now - nzT0 >= NOISE_REPLY_MS) nzState = 0;   // no reply: try again next time
+    return;
+  }
+  if (!loraOk || (int32_t)(now - nzNext) < 0) return;
+  if (rxLen != 0 || now - rxLastByte < NOISE_QUIET_MS) return;
+  if (digitalRead(PIN_E220_AUX) == LOW) return;
+  static const uint8_t cmd[] = {0xC0, 0xC1, 0xC2, 0xC3, 0x00, 0x01};
+  loraSerial.write(cmd, sizeof(cmd));
+  nzState = 1;
+  nzT0 = now;
+  nzNext = now + NOISE_POLL_MS;
+}
+
 void setup() {
   pinMode(PIN_LED, OUTPUT);
   Serial.begin(115200);
   printVersion();
   e220.begin();
-  configureLora();
+  loraOk = configureLora();
+  nzNext = millis() + NOISE_POLL_MS;
 }
 
 void loop() {
   static uint16_t badSeen = 0;
+  uint32_t now = millis();
   const char *ln = loraReadLine();
   if (ln) {
     Serial.println(ln);
     digitalWrite(PIN_LED, !digitalRead(PIN_LED));
   }
+  if (rxRssiNew) {           // R:tower,-87 or R:psu,-92
+    rxRssiNew = false;
+    Serial.print(F("R:"));
+    Serial.print(rxRssiTag[1] == 'S' ? F("psu") : F("tower"));
+    Serial.print(',');
+    Serial.println(rxRssiDbm);
+  }
+  if (nzNew) {               // N:-112
+    nzNew = false;
+    Serial.print(F("N:"));
+    Serial.println(nzDbm);
+  }
+  serviceNoise(now);
   if (rxBad != badSeen) {
     badSeen = rxBad;
     Serial.print(F("E:bad packet #"));

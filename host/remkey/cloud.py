@@ -244,6 +244,23 @@ def summary_html(st: dict) -> str:
             (f"{_cap(names[0])} temperature", _f(t.get("temp_c"), 1, " C")),
             (f"{_cap(names[1])} temperature", _f(t.get("temp2_c"), 1, " C")),
         ]
+    sig = st.get("signal") or {}
+    if any(sig.get(k) for k in ("tower", "psu", "noise")):
+        noise = sig.get("noise")
+
+        def _rssi(r):
+            if not r:
+                return "no report"
+            txt = f"{r['dbm']} dBm (5-min avg {_f(r['avg'], 0)}, worst {r['min']})"
+            if noise and noise.get("avg") is not None and r.get("avg") is not None:
+                txt += f", {_f(r['avg'] - noise['avg'], 0)} dB over noise"
+            return txt
+        rows += [
+            ("Tower-top signal at shack", _rssi(sig.get("tower"))),
+            ("Supply box signal at shack", _rssi(sig.get("psu"))),
+            ("Noise floor at shack", "no report" if not noise else
+             f"{noise['dbm']} dBm (5-min avg {_f(noise['avg'], 0)}, highest {noise['max']})"),
+        ]
     xv = (st.get("xv") or {}).get("s")
     if xv:
         rows.append(("Transverter status (MKU 's' reply)", xv["text"]))

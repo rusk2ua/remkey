@@ -31,8 +31,10 @@ from .telemetry import (
     PowerPacket,
     ReplyAssembler,
     ReplyPart,
+    SignalStats,
     gauge_match,
     parse_any,
+    parse_signal,
 )
 
 log = logging.getLogger("remkey.station")
@@ -95,6 +97,7 @@ class TelemetryHub:
         self.base_config_ok: bool | None = None
         self.base_time = 0.0
         self.base_up = True
+        self.signal = SignalStats()                  # RSSI per box and noise floor, from the base
         self.pwr_flags: dict[str, bool] = {}
         # for the web dashboard
         self.alerts: deque[dict] = deque(maxlen=200)
@@ -127,6 +130,10 @@ class TelemetryHub:
             self._on_power(p)
             return
         if not isinstance(p, Packet):
+            sig = parse_signal(line)
+            if sig is not None:
+                self.signal.add(*sig)
+                return
             if line.startswith(("V:", "C:")):
                 log.info("telemetry base: %s", line)
                 self.base_time = time.time()

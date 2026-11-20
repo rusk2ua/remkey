@@ -444,7 +444,7 @@ With remtlm, the station has up to five Nanos. Each is a separate board on its o
 | Nano | Where | Firmware | Connects to |
 |---|---|---|---|
 | remkey station | Shack PC (USB) | remkey, station role | `keyer_port` in `station.toml`, and the 7610 keying lines |
-| remtlm base | Shack PC (USB) | remtlm 0.4.0, base | `tlm_port` in `station.toml`, plus its own E220 |
+| remtlm base | Shack PC (USB) | remtlm 0.5.0, base | `tlm_port` in `station.toml`, plus its own E220 |
 | remtlm psu | Supply box at the tower base | remtlm 0.4.0, psu | Its own E220, INA226, DS18B20 |
 | remtlm tower | Tower-top box | remtlm, tower | Its own E220, PA and MKU sense lines, probes |
 | remkey client | Travel end (Mac, USB) | remkey, client role | Paddle and PTT switch; the Mac client by USB |
@@ -642,6 +642,10 @@ Afterwards, the Nano finds its module already set and skips the write at boot: n
    - `$RT,...` readings, `$RK,...` transverter replies (the first, about 5 s after boot, is the `v` reply)
    - `$RS,...` supply-box readings
 7. The base Nano prints only valid packets, from both boxes. `python -m remkey.tlmview --port <port>` shows them decoded, with `BASE supply` lines for the supply box.
+8. From remtlm 0.5.0, the base also reports signal strength at the shack. The first boot after the update prints `C:written` again, because it turns on two E220 options: an RSSI byte after every received packet, and the noise-floor register.
+   - After each packet: `R:tower,<dBm>` or `R:psu,<dBm>`, the strength of the packet just received.
+   - Every 10 s, between packets: `N:<dBm>`, the noise floor on channel 77.
+   - Only the base changes. The tower and supply-box firmware and their packets are the same as in 0.4.0, so neither box needs reflashing.
 
 ### Shack configuration
 
@@ -657,6 +661,7 @@ In `station.toml`, set `tlm_port` to the base Nano's COM port. Then:
   - supply below `v_min_alert` or above `v_max_alert` (checked at each INA226, labeled `at tower base` or `tower-top`), current above `i_max_alert` or below `i_min_alert`, or an INA226 not answering
   - supply box at or above `box_temp_warn_c`
 - **TX summary:** when you drop PTT, the client prints `last TX: PA peak … W | supply min … V, peak … A`.
+- **Signal strength:** with base firmware 0.5.0 or later, the dashboard's tower and supply-box cards show a "Signal at shack" line: the latest RSSI, the 5-minute average and worst case, and the margin over the noise floor. The margin is shown as a warning below 10 dB. The cloud summary has the same figures.
 - **CSV log:** every reading is also logged to `remkey-tlm.csv`, which gives you temperature, voltage and current history: one row per top-box packet, or per supply-box packet while the top box is silent. `supply_at` says where the voltage was measured (`base` or `top`), and `top_v_avg` holds the top voltage when both boxes measure. The station log records each transverter reply.
 
 ### Web dashboard

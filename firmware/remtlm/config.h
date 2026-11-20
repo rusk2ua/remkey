@@ -123,3 +123,11 @@
 #define PSU_MIN_GAP_MS    400UL   // never send more often than this
 #define PSU_REPORT_MS     2000UL  // free-running period when the tower is silent
 #define PSU_TOWER_LOST_MS 3500UL  // no tower $RT this long -> free-running
+
+// ---------------------------------------------------------------------------
+// Signal reports (BASE). The base's E220 adds an RSSI byte to every packet it
+// receives, and the base reads the module's noise-floor register between packets.
+// ---------------------------------------------------------------------------
+#define NOISE_POLL_MS     10000UL // how often to read the noise floor
+#define NOISE_QUIET_MS    150UL   // only after the link has been quiet this long
+#define NOISE_REPLY_MS    200UL   // give up on a reply after this

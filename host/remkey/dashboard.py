@@ -521,6 +521,7 @@ def build_state(svc, public: bool = False) -> dict:
         "config": hub.base_config, "config_ok": hub.base_config_ok,
         "age_s": round(now - hub.base_time, 1) if hub.base_time else None,
     }
+    st["signal"] = hub.signal.snapshot()
     box = hub.box
     st["supply"] = None if box is None else {
         "ok": box.ok, "v_avg": box.v_avg, "v_min": box.v_min, "v_max": box.v_max,

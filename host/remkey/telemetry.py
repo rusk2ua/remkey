@@ -331,6 +331,62 @@ class LinkStats:
         return (time.monotonic() if now is None else now) - self.last_rx
 
 
+def parse_signal(line: str) -> tuple[str, int] | None:
+    """Signal reports from the base Nano: "R:tower,-87" / "R:psu,-92" (RSSI of the
+    packet just received) and "N:-112" (the channel's noise floor). Returns
+    ("tower" | "psu" | "noise", dBm), or None for anything else."""
+    try:
+        if line.startswith("R:"):
+            src, dbm = line[2:].split(",", 1)
+            src = src.strip()
+            if src in ("tower", "psu"):
+                return src, int(dbm)
+        elif line.startswith("N:"):
+            return "noise", int(line[2:])
+    except ValueError:
+        pass
+    return None
+
+
+class SignalStats:
+    """Latest RSSI per box and the noise floor, with 5-minute average and worst case."""
+
+    WINDOW_S = 300
+
+    def __init__(self) -> None:
+        self._data: dict[str, deque] = {}
+        self._last: dict[str, tuple[float, int]] = {}
+
+    def add(self, key: str, dbm: int, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        d = self._data.setdefault(key, deque())
+        d.append((now, dbm))
+        while d and d[0][0] < now - self.WINDOW_S:
+            d.popleft()
+        self._last[key] = (now, dbm)
+
+    def snapshot(self, now: float | None = None) -> dict[str, dict | None]:
+        """{"tower": ..., "psu": ..., "noise": ...}; each {dbm, avg, min, max, n, age_s} or None.
+        For RSSI the worst case is the minimum; for noise it's the maximum."""
+        now = time.monotonic() if now is None else now
+        out: dict[str, dict | None] = {}
+        for key in ("tower", "psu", "noise"):
+            last = self._last.get(key)
+            d = [v for t, v in self._data.get(key, ()) if t >= now - self.WINDOW_S]
+            if last is None:
+                out[key] = None
+                continue
+            out[key] = {
+                "dbm": last[1],
+                "avg": round(sum(d) / len(d), 1) if d else None,
+                "min": min(d) if d else None,
+                "max": max(d) if d else None,
+                "n": len(d),
+                "age_s": round(now - last[0], 1),
+            }
+        return out
+
+
 class CsvLog:
     """Appends one row per reporting interval. Opens the file per write so it's safe to read live.
 

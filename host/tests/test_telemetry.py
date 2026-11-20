@@ -530,3 +530,30 @@ def test_powerstats_base_box_only(tmp_path, capsys):
     assert "RECEIVE: 75 intervals" in out and "TRANSMIT: 25 intervals" in out
     assert "at the supply box (tower base)" in out
     assert "needs the tower-top voltage" in out
+
+
+# --- signal reports from the base Nano (remtlm 0.5.0) -------------------------
+
+def test_parse_signal_lines():
+    from remkey.telemetry import parse_signal
+    assert parse_signal("R:tower,-87") == ("tower", -87)
+    assert parse_signal("R:psu,-102") == ("psu", -102)
+    assert parse_signal("N:-112") == ("noise", -112)
+    for junk in ("R:", "R:moon,-50", "R:tower,abc", "N:", "N:x", "V:remtlm 0.5.0 base", "$RT,1"):
+        assert parse_signal(junk) is None
+
+
+def test_signal_stats_window_and_worst_case():
+    from remkey.telemetry import SignalStats
+    s = SignalStats()
+    assert s.snapshot(now=0.0) == {"tower": None, "psu": None, "noise": None}
+    s.add("tower", -80, now=0.0)
+    s.add("tower", -90, now=100.0)
+    s.add("noise", -115, now=100.0)
+    s.add("noise", -105, now=150.0)
+    snap = s.snapshot(now=200.0)
+    assert snap["tower"] == {"dbm": -90, "avg": -85.0, "min": -90, "max": -80, "n": 2, "age_s": 100.0}
+    assert snap["noise"]["max"] == -105 and snap["psu"] is None
+    # after 5 minutes the old readings drop out of the window, but the latest stays
+    snap = s.snapshot(now=420.0)
+    assert snap["tower"]["n"] == 0 and snap["tower"]["avg"] is None and snap["tower"]["dbm"] == -90

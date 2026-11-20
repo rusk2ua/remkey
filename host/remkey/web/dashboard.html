@@ -249,6 +249,26 @@ function dl(rows) {
 function valSpan(text, bad, warn) {
   return el("span", { class: bad ? "v-bad" : warn ? "v-warn" : "", text });
 }
+// Signal at the shack receiver for one box ("tower" or "psu"): latest RSSI, 5-minute
+// average and worst case, and the margin over the noise floor (warn under 10 dB).
+function sigText(key) {
+  const G = S.signal || {}, r = G[key], n = G.noise;
+  if (!r) return st("off", "no report (base firmware 0.5.0 or later)");
+  let text = `${r.dbm} dBm`;
+  if (r.avg !== null) text += ` · avg ${num(r.avg, 0)}, worst ${r.min} (5 min)`;
+  let low = false;
+  if (n && n.avg !== null && r.avg !== null) {
+    const m = r.avg - n.avg;
+    text += ` · ${num(m, 0)} dB over noise`;
+    low = m < 10;
+  }
+  return valSpan(text, false, low);
+}
+function noiseText() {
+  const n = (S.signal || {}).noise;
+  if (!n) return st("off", "no report yet");
+  return `${n.dbm} dBm` + (n.avg !== null ? ` · avg ${num(n.avg, 0)}, highest ${n.max} (5 min)` : "");
+}
 
 // ---------------------------------------------------------------- render state
 function render() {
@@ -289,6 +309,8 @@ function render() {
     rows.push(["Since reset", `${ex("v", 0)} – ${ex("v", 1)} V · peak ${ex("i", 1)} A · box max ${ex("box_temp", 1, 1)} °C`]);
     rows.push(["Link", stale ? st("bad", `lost · ${ago(b.age_s)}`) :
       `${num(b.loss_pct, 1)}% loss (5 min) · ${b.received} rx, ${b.lost} lost, ${b.resets} resets`]);
+    rows.push(["Signal at shack", sigText("psu")]);
+    rows.push(["Noise at shack", noiseText()]);
     rows.push(["Box uptime", dur(b.uptime_s)]);
     $("#supply-body").replaceChildren(hero, dl(rows));
   } else if (S.telemetry) {
@@ -299,7 +321,8 @@ function render() {
       : r.config == null ? st("off", `${r.port}: open, no startup report yet`)
       : r.config_ok ? st("good", `${r.port}: ${r.version || "remtlm"} · E220 OK (${r.config})`)
       : st("bad", `${r.port}: E220 config error (${r.config})`);
-    $("#supply-body").replaceChildren(el("div", { class: "empty", text: "Waiting for the supply box." }), dl([["Shack receiver", rx]]));
+    $("#supply-body").replaceChildren(el("div", { class: "empty", text: "Waiting for the supply box." }),
+      dl([["Shack receiver", rx], ["Noise at shack", noiseText()]]));
   }
 
   // --- tower top
@@ -325,6 +348,7 @@ function render() {
       [names[1], t.temp2_c === null ? st("off", "no probe") : valSpan(`${num(t.temp2_c, 1)} °C`, false, hot2)],
       ["Since reset", `PA peak ${X.pa_pk ? num(X.pa_pk[1], d) : "—"} ${unit} · max ${X.t1 ? num(X.t1[1], 1) : "—"} / ${X.t2 ? num(X.t2[1], 1) : "—"} °C`],
       ["Link", t.stale ? st("bad", `lost · ${ago(t.age_s)}`) : `${num(t.loss_pct, 1)}% loss (5 min) · ${t.received} rx, ${t.lost} lost, ${t.resets} resets`],
+      ["Signal at shack", sigText("tower")],
       ["Tower uptime", dur(t.uptime_s)],
     ];
     $("#tower-body").replaceChildren(hero, dl(rows));
