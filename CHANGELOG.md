@@ -3,6 +3,15 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-20 (remtlm 0.6.1)
+
+### remtlm firmware
+- Key line: hysteresis (keyed below 1.0 V, released above 1.5 V), so a line near the
+  threshold doesn't flicker.
+- Lock and key-line changes still send a packet right away, but at most one extra
+  packet per 300 ms (`CHANGE_GAP_MS`). On the bench, a floating A3 sent about 12
+  packets a second, enough to crowd out the supply box on the shared channel.
+
 ## 2026-11-20 (remtlm 0.6.0, host 0.10.0)
 
 ### remtlm firmware

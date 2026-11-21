@@ -79,6 +79,7 @@
 #endif
 #define PTT_DIVIDER_X1000   3136UL
 #define PTT_ASSERT_MV       1000     // line below this = keyed
+#define PTT_RELEASE_MV      1500     // and above this = released again (hysteresis)
 
 // ---------------------------------------------------------------------------
 // Kuhne MKU 10 G5 serial interface (3.3 V, 9600 8N1). Read-only: the tower
@@ -122,6 +123,7 @@
 #define SAMPLE_MS        5UL     // analog sampling: catches the peak of a 20 WPM dit
 #define REPORT_IDLE_MS   2000UL  // packet rate while the PA is quiet
 #define REPORT_ACTIVE_MS 500UL   // packet rate while the PA shows output
+#define CHANGE_GAP_MS    300UL   // lock / key-line changes: at most one extra packet per 300 ms
 #define ACTIVE_MV        150     // PA sense above this = "transmitting"
 #define TEMP_PERIOD_MS   2000UL  // DS18B20 conversion cadence (tower and PSU)
 

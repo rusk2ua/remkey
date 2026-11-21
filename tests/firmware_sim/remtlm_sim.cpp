@@ -80,7 +80,7 @@ static void testPsu() {
   ina.shunt = 1600;     // 4.0 mV across 3.75 mOhm = 1066 mA
   dallas.count = 1;
   boot();
-  CHECK(Serial.out.find("V:remtlm 0.6.0 psu") != std::string::npos, "version line: %s", Serial.out.c_str());
+  CHECK(Serial.out.find("V:remtlm 0.6.1 psu") != std::string::npos, "version line: %s", Serial.out.c_str());
   CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_DISABLED, "psu keeps the RSSI byte off");
   CHECK(Serial.out.find("I:INA226 ok") != std::string::npos, "INA226 found");
 
@@ -184,7 +184,7 @@ static void testTower() {
   ina.shunt = 2400;     // 6 mV -> 1600 mA
   dallas.count = 2;
   boot();
-  CHECK(Serial.out.find("V:remtlm 0.6.0 tower") != std::string::npos, "version line");
+  CHECK(Serial.out.find("V:remtlm 0.6.1 tower") != std::string::npos, "version line");
   CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_DISABLED, "tower keeps the RSSI byte off");
   CHECK(Serial.out.find("I:temperature probes=2") != std::string::npos, "two probes");
   run(4600);
@@ -223,19 +223,20 @@ static void testTower() {
   size_t before = sent.size();
   uint32_t t0 = sim.now;
   sim.adc[A3] = 20;                     // 98 mV at the pin = 307 mV on the line
-  run(30);
+  run(CHANGE_GAP_MS + 30);
   bool quick = false;
   for (size_t i = before; i < sent.size(); i++)
-    if (sent[i].second.rfind("$RT,", 0) == 0 && sent[i].first - t0 <= 15 && field(sent[i].second, 9) == "1")
+    if (sent[i].second.rfind("$RT,", 0) == 0 && sent[i].first - t0 <= CHANGE_GAP_MS + 15 &&
+        field(sent[i].second, 9) == "1")
       quick = true;
-  CHECK(quick, "keying reported within 15 ms");
+  CHECK(quick, "keying reported within the change gap, not the 0.5 s schedule");
   // A short key-down between packets is still caught: keyed at any point in the interval.
   sim.adc[A3] = 512;
   run(600);
+  before = sent.size();
   sim.adc[A3] = 20;
   run(20);
   sim.adc[A3] = 512;
-  before = sent.size();
   run(1200);
   int keyed = 0;
   for (size_t i = before; i < sent.size(); i++)
@@ -243,7 +244,26 @@ static void testTower() {
   rt = lastRt();
   CHECK(field(rt, 9) == "0", "released afterwards: %s", rt.c_str());
   for (auto &s : sent) CHECK(tlmValid(s.second.c_str()), "valid: %s", s.second.c_str());
-  CHECK(keyed == 1, "the release packet still says keyed (keyed during its interval): %d", keyed);
+  CHECK(keyed >= 1 && keyed <= 2, "a 20 ms key-down shows up (keyed at the start of the next interval too): %d", keyed);
+  // Hysteresis: 1.2 V on the line (between 1.0 and 1.5 V) keeps whatever state it had.
+  sim.adc[A3] = 20;
+  run(400);
+  sim.adc[A3] = 78;                     // 381 mV at the pin = 1.196 V on the line
+  run(1200);
+  CHECK(field(lastRt(), 9) == "1", "1.2 V after keyed: still keyed (%s)", lastRt().c_str());
+  sim.adc[A3] = 512;
+  run(1200);
+  // A chattering line (an open input, a bad contact) can't flood the channel:
+  // at most one extra packet per CHANGE_GAP_MS.
+  before = sent.size();
+  for (int i = 0; i < 400; i++) {
+    sim.adc[A3] = (i & 1) ? 20 : 512;
+    run(5);
+  }
+  int n = 0;
+  for (size_t i = before; i < sent.size(); i++)
+    if (sent[i].second.rfind("$RT,", 0) == 0) n++;
+  CHECK(n <= 2000 / (int)CHANGE_GAP_MS + 1, "chatter limited: %d $RT in 2 s", n);
 }
 #endif
 

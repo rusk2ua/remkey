@@ -54,7 +54,7 @@
 #include <Wire.h>
 #endif
 
-#define FW_VERSION "0.6.0"
+#define FW_VERSION "0.6.1"
 
 SoftwareSerial loraSerial(PIN_E220_TXD, PIN_E220_RXD);   // (rx, tx) from the Nano's side
 LoRa_E220 e220(&loraSerial, PIN_E220_AUX, PIN_E220_M0, PIN_E220_M1);
@@ -413,7 +413,15 @@ static bool lastLock = true;
 static bool pttAny = false;          // keyed at any point since the last packet
 static bool lastPtt = false;
 static uint16_t pttMv = 0;           // line voltage, last sample
-static uint32_t nextSample = 0, nextReport = 0;
+static uint32_t nextSample = 0, nextReport = 0, lastSent = 0;
+
+// A lock or key-line change sends a packet right away, but never sooner than
+// CHANGE_GAP_MS after the previous one: a chattering line can't flood the channel.
+static void reportSoon(uint32_t now) {
+  uint32_t t = lastSent + CHANGE_GAP_MS;
+  if ((int32_t)(t - now) < 0) t = now;
+  if ((int32_t)(t - nextReport) < 0) nextReport = t;
+}
 
 
 static uint16_t pinMv(uint8_t pin) {   // volts at the Nano pin
@@ -426,7 +434,7 @@ static uint16_t senseMv(uint8_t pin) { // volts at the source, before the divide
 
 static bool pttKeyed() {
   pttMv = (uint16_t)(((uint32_t)pinMv(PIN_PTT_SENSE) * PTT_DIVIDER_X1000) / 1000UL);
-  return pttMv < PTT_ASSERT_MV;
+  return pttMv < (lastPtt ? PTT_RELEASE_MV : PTT_ASSERT_MV);   // hysteresis
 }
 
 static bool refLocked() {
@@ -579,7 +587,7 @@ void loop() {
       if (k) pttAny = true;
       if (k != lastPtt) {          // report key-line changes right away
         lastPtt = k;
-        nextReport = now;
+        reportSoon(now);
       }
     }
     if (LOCK_MONITOR) {
@@ -587,7 +595,7 @@ void loop() {
       if (!lk) lockAll = false;
       if (lk != lastLock) {        // report lock changes right away
         lastLock = lk;
-        nextReport = now;
+        reportSoon(now);
       }
     }
   }
@@ -603,6 +611,7 @@ void loop() {
   if ((int32_t)(now - nextReport) >= 0) {
     bool active = paPk > ACTIVE_MV;
     sendReport();
+    lastSent = now;
     nextReport = now + (active ? REPORT_ACTIVE_MS : REPORT_IDLE_MS);
   }
 }
