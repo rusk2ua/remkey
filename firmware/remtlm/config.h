@@ -74,7 +74,9 @@
 //   line -> 100k to +5 V (so an open line reads high, ~2 V, not "keyed")
 //   line -> 47k -> A3 -> 22k + 100 nF to GND   (safe up to ~15 V on the line)
 // PTT_DIVIDER_X1000 = (47k + 22k) / 22k x1000, to report volts on the line.
-#define PTT_SENSE           1
+#ifndef PTT_SENSE
+#define PTT_SENSE           1        // 0 on a tower without the network (RK-302 Rev A)
+#endif
 #define PTT_DIVIDER_X1000   3136UL
 #define PTT_ASSERT_MV       1000     // line below this = keyed
 

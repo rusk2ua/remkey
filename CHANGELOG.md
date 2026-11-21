@@ -21,6 +21,13 @@ firmware and the remtlm telemetry firmware each carry their own version.
 - The dashboard, cloud summary and `tlmview` show the key line; the CSV log gains
   `key_line` and `key_line_v` (an older log file is set aside and a new one started).
 
+### Hardware
+- RK-301, RK-302 and RK-303 Rev A are recorded as ordered (JLCPCB, 2026-11) and frozen.
+- RK-302 Rev B: a #20 hole for MKU CON1 pin 8 (W16, "PTT 8") and the key-line network
+  on A3 (R16 100k pull-up, R14 47k / R15 22k, C5 100 nF). Rerouted, DRC clean apart from
+  the usual library-path notes and one single-spoke thermal on C5. New fab files.
+- Tower signals schematic shows the network.
+
 ### Docs
 - Tower prototype: the key-line network takes rows 12-13. The PTC moves into the
   +13.8 V lead, and the DS18B20 pull-up to the Nano carrier's D5/5V terminals.

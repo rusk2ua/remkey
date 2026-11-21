@@ -519,16 +519,17 @@ def tlm_signals():
     SP = 3.0
     nano = d.add(_box(
         pins=[elm.IcPin(name=p, side="left") for p in
-              ["D5", "GND", "D12", "D11", "A2", "A1", "A0"]],
+              ["D5", "GND", "D12", "D11", "A2", "A3", "A1", "A0"]],
         pinspacing=SP, edgepadW=1.8, leadlen=0.6,
         label="tower\nNano", lblsize=13))
-    y = {p: nano.absanchors[p].y for p in ["A0", "A1", "A2", "D11", "D12", "GND", "D5"]}
+    y = {p: nano.absanchors[p].y for p in ["A0", "A1", "A2", "A3", "D11", "D12", "GND", "D5"]}
     XL = nano.absanchors["A0"].x - 19.0   # source column
     mku = d.add(_box(
         pins=[elm.IcPin(name="GND", pin="15", side="right", anchorname="15"),
               elm.IcPin(name="RXD", pin="12", side="right", anchorname="12"),
               elm.IcPin(name="TXD", pin="11", side="right", anchorname="11"),
               elm.IcPin(name="LD", pin="16", side="right", anchorname="16"),
+              elm.IcPin(name="PTT out", pin="8", side="right", anchorname="8"),
               elm.IcPin(name="MON", pin="9", side="right", anchorname="9")],
         pinspacing=SP, edgepadW=3.2, leadlen=0.8,
         label="Kuhne\nMKU 10 G5\nCON1", lblsize=12).anchor("9").at((XL, y["A1"])))
@@ -556,6 +557,28 @@ def tlm_signals():
     d.add(elm.Ground())
     d.add(elm.Label().at((XL + 7.0, a.y + 0.35)).label(
         "3.3 V via 330 Ω when locked; read as analog vs 1.65 V", halign="left", fontsize=10, color=GRAY))
+
+    # A3: key line to the sequencer (PTT out, active low), watched only
+    k = mku.absanchors["8"]
+    d.add(elm.Line().at(k).to((XL + 1.2, k.y)))
+    pn = d.add(elm.Dot()).center
+    d.add(elm.Resistor().up().at(pn).length(1.4).label("100 kΩ", loc="bottom", fontsize=10))
+    d.add(elm.Vdd().label("+5V"))
+    d.add(elm.Line().at(pn).down().length(1.2))
+    d.add(elm.Dot(open=True).label("to the sequencer", loc="bottom", fontsize=10))
+    d.add(elm.Line().at(pn).to((XL + 2.6, k.y)))
+    d.add(elm.Resistor().right().length(2.4).label("47 kΩ", loc="top"))
+    an = d.add(elm.Dot()).center
+    d.add(elm.Line().at(an).to(nano.absanchors["A3"]))
+    d.add(elm.Resistor().down().at(an).length(1.4).label("22 kΩ", loc="bottom", fontsize=10))
+    d.add(elm.Ground())
+    d.add(elm.Line().at(an).right().length(1.5))
+    d.add(elm.Dot())
+    d.add(elm.Capacitor().down().length(1.4).label("100 nF", loc="bottom", fontsize=10))
+    d.add(elm.Ground())
+    d.add(elm.Label().at((XL + 8.0, k.y + 0.35)).label(
+        "keyed = low; open line reads ~2 V (not keyed); safe to ~15 V", halign="left", fontsize=10,
+        color=GRAY))
 
     # serial through the BSS138 shifter
     XS = XL + 8.0

@@ -1,5 +1,5 @@
 {
   "psu":   {"pn": "RK-301", "rev": "A", "date": "2026-11", "title": "remtlm supply box"},
-  "tower": {"pn": "RK-302", "rev": "A", "date": "2026-11", "title": "remtlm tower top"},
+  "tower": {"pn": "RK-302", "rev": "B", "date": "2026-11", "title": "remtlm tower top"},
   "shack": {"pn": "RK-303", "rev": "A", "date": "2026-11", "title": "remtlm shack base"}
 }

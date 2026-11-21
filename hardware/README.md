@@ -5,7 +5,7 @@ Three two-layer boards for the remtlm telemetry nodes, all through-hole, built b
 | Part number | Board | Folder | Size | Goes in | Holds |
 |---|---|---|---|---|---|
 | RK-301 Rev A | Supply box (PSU) | `psu/` | 102 × 52 mm | Hammond 1590B at the tower base | Nano, INA226 module, mini buck, polyfuse, E220 dividers, one DS18B20 |
-| RK-302 Rev A | Tower top | `tower/` | 102 × 52 mm | Hammond 1590B at the tower top | Nano, mini buck, AMS1117-3.3, BSS138 shifter, PA/MKU conditioning, two DS18B20s |
+| RK-302 Rev B | Tower top | `tower/` | 102 × 52 mm | Hammond 1590B at the tower top | Nano, mini buck, AMS1117-3.3, BSS138 shifter, PA/MKU conditioning, key-line (MKU PTT out) sense, two DS18B20s |
 | RK-303 Rev A | Shack (BASE) | `shack/` | 64 × 40 mm | No enclosure; USB from the shack PC | Nano, E220 dividers |
 
 Part numbers, revisions and the rules for changing them are in [`REVISIONS.md`](REVISIONS.md). Each folder has the KiCad 7 board (`*.kicad_pcb`), a Gerber + drill zip for the fab (`fab/<pn>-rev<rev>-*-gerbers.zip`), a parts list (`*-bom.csv`), top and bottom renders (`img/`) and the DRC report (`*.drc.txt`).

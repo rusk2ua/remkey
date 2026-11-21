@@ -27,7 +27,7 @@ b.text("3.3V REG", 28.54, 43.4, 0.8)
 
 # ---------------------------------------------------------------- transverter and PA wires (#20) along the top
 top = [("W3", 20.0, "XV_TXD", "TXD 11"), ("W4", 24.5, "XV_RXD", "RXD 12"), ("W5", 29.0, "LD", "LD 16"),
-       ("W6", 33.5, "MON", "MON 9"), ("W7", 38.0, "GND", "GND 15"),
+       ("W6", 33.5, "MON", "MON 9"), ("W7", 38.0, "GND", "GND 15"), ("W16", 42.0, "PTT", "PTT 8"),
        ("W8", 46.0, "PA_SENSE", "PA SENSE"), ("W9", 50.5, "GND", "PA GND")]
 for ref, x, net, lab in top:
     b.wire(ref, x, 4.2, 20, net, None)
@@ -47,7 +47,7 @@ b.rect(26.0, 15.9, 42.7, 28.3)
 b.text("LEVEL SHIFTER", 34.35, 22.1, 0.8)
 
 # ---------------------------------------------------------------- Nano, USB end towards the right-hand wall
-b.nano("U5", 95.0, 18.0, {"A0": "A0", "A1": "A1", "A2": "LD", "5V": "+5V", "GND": "GND",
+b.nano("U5", 95.0, 18.0, {"A0": "A0", "A1": "A1", "A2": "LD", "A3": "A3", "5V": "+5V", "GND": "GND",
                           "D5": "DQ", "D6": "AUX", "D7": "E_TXD", "D8": "D8", "D9": "D9", "D10": "D10",
                           "D11": "XV_RX", "D12": "XV_TX"})
 
@@ -63,6 +63,13 @@ b.lib("R12", R, RV, 55.0, 13.0, {"1": "LD", "2": "GND"}, "100k")
 b.text("R8 10k R9 22k C3", 61.0, 5.4, 0.8)
 b.text("R10 10k R11 22k C4", 79.0, 5.4, 0.8)
 b.text("R12 100k", 63.0, 13.0, 0.8, just="l")
+# Rev B: key line to the sequencer (MKU CON1 pin 8, PTT out, active low), watched on A3.
+# 100k pull-up (an open line reads high), 47k/22k divider (safe to ~15 V), 100 nF.
+b.lib("R14", R, RV, 71.0, 13.0, {"1": "PTT", "2": "A3"}, "47k")
+b.lib("R15", R, RV, 76.5, 13.0, {"1": "A3", "2": "GND"}, "22k")
+b.lib("C5", "Capacitor_THT", CD, 82.0, 13.0, {"1": "A3", "2": "GND"}, "100nF")
+b.lib("R16", R, RV, 88.0, 13.0, {"1": "PTT", "2": "+5V"}, "100k")
+b.text("R14 47k  R15 22k  C5  R16 100k", 79.5, 10.9, 0.8)
 
 # ---------------------------------------------------------------- E220 dividers and ribbon
 for ref, x, y, n1, n2, v in (("R1", 42.0, 38.0, "D9", "M0", "1k"), ("R2", 42.0, 42.0, "M0", "GND", "2k"),

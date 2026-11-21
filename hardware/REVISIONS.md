@@ -18,13 +18,33 @@ each board's silkscreen and uses them in the fab-file names
 
 | Part number | Board | Current rev | Ordered | Tag |
 |---|---|---|---|---|
-| RK-301 | Supply box (tower base, Hammond 1590B) | A | no | |
-| RK-302 | Tower top (Hammond 1590B) | A | no | |
-| RK-303 | Shack base (USB, no box) | A | no | |
+| RK-301 | Supply box (tower base, Hammond 1590B) | A | Rev A: JLCPCB, 2026-11 | `RK-301-revA` |
+| RK-302 | Tower top (Hammond 1590B) | B | Rev A: JLCPCB, 2026-11. Rev B: no | `RK-302-revA` |
+| RK-303 | Shack base (USB, no box) | A | Rev A: JLCPCB, 2026-11 | `RK-303-revA` |
+
+## RK-302 Rev B (2026-11)
+
+Not yet ordered. Changes from Rev A:
+
+- **Key line to the sequencer, watched on A3.** A new #20 wire hole, W16 "PTT 8", for
+  MKU CON1 pin 8 (PTT out, active low), between GND 15 and PA SENSE. It also stays wired
+  to the sequencer: the tower only listens.
+- **R16 100k** pull-up from the line to +5 V, so an open line (sequencer unplugged or dead)
+  reads about 2 V, not "keyed".
+- **R14 47k / R15 22k** divider into A3, with **C5 100 nF** to GND. A3 stays under 5 V with
+  up to about 15 V on the line, so pin 8 can be open collector or driven.
+- Needs tower firmware remtlm 0.6.0 or later to report it. Rev A boards work with 0.6.0
+  too, but A3 floats on them, so build their firmware with `PTT_SENSE 0` (on the
+  arduino-cli command line: `-DPTT_SENSE=0`), or add the four parts off the board at the
+  Nano's A3 socket pin.
+- DRC: as Rev A (library-path notes only), plus one thermal-relief note on C5's GND pad
+  (one spoke instead of two; solders fine). 0 unconnected pads.
+
 
 ## RK-301 / RK-302 / RK-303 Rev A (2026-11)
 
-First release, not yet ordered.
+First release. All three ordered from JLCPCB in 2026-11 and frozen. The fab files are in
+the `RK-30x-revA` tags.
 
 - Through-hole, two layers. The Nano, INA226 (RK-301), buck, AMS1117-3.3 (RK-302) and
   BSS138 shifter (RK-302) modules sit in sockets. Wires solder into sized holes
