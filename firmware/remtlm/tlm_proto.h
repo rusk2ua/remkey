@@ -1,7 +1,7 @@
 // remtlm packet formats, shared by the tower, psu and base roles (and the host tests).
 //
 // Readings, every 0.5-2 s:
-//   $RT,<seq>,<pa_pk_mv>,<pa_avg_mv>,<xv_pk_mv>,<lock>,<t1_c10>,<t2_c10>,<uptime_s>,<call>*HH
+//   $RT,<seq>,<pa_pk_mv>,<pa_avg_mv>,<xv_pk_mv>,<lock>,<t1_c10>,<t2_c10>,<uptime_s>,<ptt>,<ptt_mv>,<call>*HH
 //
 //   seq        0..65535, wraps; lets the host count lost packets
 //   pa_pk_mv   PA power-sense peak since the previous packet, mV at the PA's output pin
@@ -12,6 +12,10 @@
 //   t1_c10     DS18B20 #1 in 0.1 C (TLM_TEMP_NONE if absent)
 //   t2_c10     DS18B20 #2 in 0.1 C (TLM_TEMP_NONE if absent)
 //   uptime_s   tower Nano uptime in seconds (shows resets / brown-outs)
+//   ptt        MKU CON1 pin 8 (PTT out to the sequencer, active low): 1 = asserted at
+//              any point in the interval, 0 = not asserted, 2 = not monitored (0.6.0+;
+//              older towers send 9 fields and no ptt/ptt_mv)
+//   ptt_mv     voltage on that line at the end of the interval, mV (0 if not monitored)
 //   call       station callsign, so every transmission is identified
 //
 // Optional tower-top supply monitor (PWR_ENABLE 1 on the tower), sent just before
@@ -95,6 +99,8 @@ struct TlmData {
   int16_t  t1C10;
   int16_t  t2C10;
   uint32_t uptimeS;
+  uint8_t  ptt;
+  uint16_t pttMv;
   const char *call;
 };
 
@@ -114,10 +120,10 @@ static inline int tlmSeal(char *buf, size_t len, int n) {
 
 // Writes a complete $RT line including "\r\n". Returns its length, or 0 if it didn't fit.
 static inline int tlmFormat(char *buf, size_t len, const TlmData *d) {
-  int n = snprintf(buf, len, "$RT,%u,%u,%u,%u,%u,%d,%d,%lu,%s",
+  int n = snprintf(buf, len, "$RT,%u,%u,%u,%u,%u,%d,%d,%lu,%u,%u,%s",
                    (unsigned)d->seq, (unsigned)d->paPkMv, (unsigned)d->paAvgMv,
                    (unsigned)d->xvPkMv, (unsigned)d->lock, (int)d->t1C10, (int)d->t2C10,
-                   (unsigned long)d->uptimeS, d->call);
+                   (unsigned long)d->uptimeS, (unsigned)d->ptt, (unsigned)d->pttMv, d->call);
   if (n <= 0 || (size_t)n >= len) return 0;
   return tlmSeal(buf, len, n);
 }

@@ -6,15 +6,22 @@
 int main() {
   int fails = 0;
   char buf[TLM_MAX_LINE];
-  TlmData d = {65535, 4987, 1234, 0, 1, 452, 318, 86400UL, "K2UA"};
+  TlmData d = {65535, 4987, 1234, 0, 1, 452, 318, 86400UL, 1, 210, "K2UA"};
   if (tlmFormat(buf, sizeof(buf), &d) <= 0) { std::printf("FAIL format\n"); return 1; }
   std::printf("%s", buf);
-  d = {7, 0, 0, 2500, 0, TLM_TEMP_NONE, TLM_TEMP_NONE, 3, "K2UA"};
+  d = {7, 0, 0, 2500, 0, TLM_TEMP_NONE, TLM_TEMP_NONE, 3, 0, 12650, "K2UA"};
   tlmFormat(buf, sizeof(buf), &d);
   std::printf("%s", buf);
-  d = {8, 100, 50, 0, 2, -105, 0, 4, "K2UA"};   // -10.5 C, lock monitoring off
+  d = {8, 100, 50, 0, 2, -105, 0, 4, 2, 0, "K2UA"};   // -10.5 C, lock and PTT monitoring off
   tlmFormat(buf, sizeof(buf), &d);
   std::printf("%s", buf);
+
+  {
+    TlmData worst = {65535, 65535, 65535, 65535, 2, -32768, -32768, 4294967295UL, 2, 65535, "K2UA"};
+    char big[TLM_MAX_LINE];
+    int m = tlmFormat(big, sizeof(big), &worst);
+    if (m <= 0 || m > 80) { fails++; std::printf("FAIL worst-case $RT length %d\n", m); }
+  }
 
   // supply monitor packet, including a negative current (reversed shunt)
   PwrData pw = {42, 13284, 12851, 13402, 4012, 3900, 6104, 1, "K2UA"};

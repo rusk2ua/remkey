@@ -5,6 +5,8 @@
 //     keeping peak and average since the last packet (so a dit's peak isn't missed)
 //   - watches the MKU's LD output (10 MHz reference lock); any unlock during an
 //     interval is reported
+//   - watches the MKU's PTT out to the sequencer (CON1 pin 8, active low); any keying
+//     during an interval is reported, with the line voltage, and changes right away
 //   - reads up to two DS18B20 probes (PA heatsink, transverter case)
 //   - optional (PWR_ENABLE 1): an INA226 in the top box, voltage at the enclosure
 //     and current, sent as a $RP packet just before each $RT
@@ -52,7 +54,7 @@
 #include <Wire.h>
 #endif
 
-#define FW_VERSION "0.5.0"
+#define FW_VERSION "0.6.0"
 
 SoftwareSerial loraSerial(PIN_E220_TXD, PIN_E220_RXD);   // (rx, tx) from the Nano's side
 LoRa_E220 e220(&loraSerial, PIN_E220_AUX, PIN_E220_M0, PIN_E220_M1);
@@ -408,6 +410,9 @@ static uint32_t paSum = 0;
 static uint16_t nSamples = 0;
 static bool lockAll = true;
 static bool lastLock = true;
+static bool pttAny = false;          // keyed at any point since the last packet
+static bool lastPtt = false;
+static uint16_t pttMv = 0;           // line voltage, last sample
 static uint32_t nextSample = 0, nextReport = 0;
 
 
@@ -417,6 +422,11 @@ static uint16_t pinMv(uint8_t pin) {   // volts at the Nano pin
 
 static uint16_t senseMv(uint8_t pin) { // volts at the source, before the divider
   return (uint16_t)(((uint32_t)pinMv(pin) * DIVIDER_X1000) / 1000UL);
+}
+
+static bool pttKeyed() {
+  pttMv = (uint16_t)(((uint32_t)pinMv(PIN_PTT_SENSE) * PTT_DIVIDER_X1000) / 1000UL);
+  return pttMv < PTT_ASSERT_MV;
 }
 
 static bool refLocked() {
@@ -457,6 +467,8 @@ static void sendReport() {
   d.t1C10 = tempC10[0];
   d.t2C10 = tempC10[1];
   d.uptimeS = millis() / 1000UL;
+  d.ptt = PTT_SENSE ? (pttAny ? 1 : 0) : 2;
+  d.pttMv = PTT_SENSE ? pttMv : 0;
   d.call = CALLSIGN;
   int n = tlmFormat(buf, sizeof(buf), &d);
   if (n > 0) loraSend(buf, n);
@@ -464,6 +476,7 @@ static void sendReport() {
   paSum = 0;
   nSamples = 0;
   lockAll = refLocked();
+  pttAny = lastPtt;                // still keyed carries into the next interval
 }
 
 #if XV_SERIAL_ENABLE
@@ -547,6 +560,7 @@ void setup() {
   xvSerial.listen();     // the E220 port is only written from here on
 #endif
   lastLock = lockAll = refLocked();
+  if (PTT_SENSE) lastPtt = pttAny = pttKeyed();
   nextReport = millis() + 500;
 }
 
@@ -560,6 +574,14 @@ void loop() {
     if (xv > xvPk) xvPk = xv;
     paSum += pa;
     nSamples++;
+    if (PTT_SENSE) {
+      bool k = pttKeyed();
+      if (k) pttAny = true;
+      if (k != lastPtt) {          // report key-line changes right away
+        lastPtt = k;
+        nextReport = now;
+      }
+    }
     if (LOCK_MONITOR) {
       bool lk = refLocked();
       if (!lk) lockAll = false;

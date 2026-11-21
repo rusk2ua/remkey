@@ -343,6 +343,10 @@ function render() {
     const X = S.extremes || {};
     const rows = [
       ["Ref lock (10 MHz)", t.lock === null ? st("off", "not monitored") : t.lock ? st("good", "Locked") : st("bad", "UNLOCKED")],
+      ["Key line (MKU pin 8)", t.ptt === null || t.ptt === undefined ? st("off", "not monitored")
+        : t.ptt ? valSpan(`KEYED${t.key_held_s ? ` for ${dur(t.key_held_s)}` : ""} · ${num(t.ptt_v, 2)} V`,
+            !!(L.ptt_stuck_s && t.key_held_s >= L.ptt_stuck_s), false)
+        : `not keyed · ${num(t.ptt_v, 2)} V`],
       ["MKU MON", t.xv_pk_w !== null && t.xv_pk_w !== undefined ? `${num(t.xv_pk_w, 1)} W (${t.xv_pk_mv} mV)` : `${t.xv_pk_mv} mV`],
       [names[0], t.temp_c === null ? st("off", "no probe") : valSpan(`${num(t.temp_c, 1)} °C`, false, hot1)],
       [names[1], t.temp2_c === null ? st("off", "no probe") : valSpan(`${num(t.temp2_c, 1)} °C`, false, hot2)],

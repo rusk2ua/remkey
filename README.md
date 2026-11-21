@@ -402,6 +402,7 @@ The **tower-top box** (TOWER image) is set up for a **Kuhne MKU 10 G5** transver
 - **PA power sense** (0–5 V), peak and average, sampled every 5 ms so CW dits aren't missed
 - **MKU MON** output (CON1 pin 9), the transverter's own power monitor
 - **10 MHz reference lock** from the MKU's LD output (CON1 pin 16); any unlock during a reporting interval is reported
+- **The key line to the sequencer** (MKU CON1 pin 8, PTT out, active low; tower firmware 0.6.0+): whether it was keyed during each interval, and its voltage. Changes are reported right away. It tells you which side failed when the MKU transmits but the PA doesn't, and it catches a key line stuck low
 - **Two DS18B20 probes**: PA heatsink and MKU case
 - **The MKU's serial status**: the `v` (firmware) reply once after boot, then the `s` (status) reply every minute, relayed verbatim
 
@@ -419,6 +420,7 @@ The top box can optionally get its own INA226 as well (`PWR_ENABLE 1`). With bot
 │ PA sense ─────────► A0 ┐                  │  927.125   │ E220 ─► BASE Nano ─USB─► PC   │
 │ MKU pin 9 MON ────► A1 │                  │    MHz     │  validates packets   station  │
 │ MKU pin 16 LD ────► A2 ├─ TOWER ─► E220 ~~~~~~~~~~~~~~►│  from both boxes     service  │
+│ MKU pin 8 PTT out ► A3 │                  │            │                              │
 │ DS18B20 ×2 ───────► D5 │   Nano     $RT  │    LoRa    │  ─► client: Ctrl-P, Ctrl-K,   │
 │ MKU pins 11/12 ◄──► D11/D12 (via shifter)│     ▲      │     Ctrl-V, alerts, TX summary│
 │ (optional INA226 ─► A4/A5)               │     ║      │                              │
@@ -474,6 +476,7 @@ The station service opens both shack ports. The keying path and the telemetry pa
 | 2 | DS18B20 waterproof probes + one 4.7 kΩ resistor | Tower: both on one bus |
 | 2 | 10 kΩ + 22 kΩ resistors, 100 nF caps | Tower: input dividers for A0 and A1 |
 | 1 | 100 kΩ resistor | Tower: pull-down on A2 (LD) |
+| 1 | 100 kΩ + 47 kΩ + 22 kΩ resistors, 100 nF cap | Tower: key-line network on A3 (MKU CON1 pin 8) |
 | — | 2.54 mm female header/jumper wires | Tower: to MKU CON1 |
 | 1 | INA226 module (e.g. CJMCU-226) | Supply box: supply monitor, I2C address 0x40 |
 | 1 | 20 A / 75 mV panel-meter shunt (3.75 mΩ) | Supply box: in the + feed to the tower cable (see below) |
@@ -511,6 +514,12 @@ PA sense      ── 10k ──┬── A0       MKU CON1 pin 9 (MON) ── 10
 
 MKU CON1 pin 16 (LD) ─────────┬── A2        LD is 3.3 V via 330 Ω when locked; the
                               └─ 100k ─ GND  pull-down holds A2 low otherwise
+
+MKU CON1 pin 8 (PTT out) ──┬── to the sequencer, as before (the tower only listens)
+                           ├── 100k ── 5V   an open line reads ~2 V, not "keyed"
+                           └── 47k ──┬── A3
+                                     ├── 22k ─ GND     keyed (low) reads ~0 V; safe to ~15 V
+                                     └── 100nF ─ GND
 
 MKU CON1 pin 11 (TXD) ── shifter LV1 ═ HV1 ── D11
 MKU CON1 pin 12 (RXD) ── shifter LV2 ═ HV2 ── D12
@@ -660,9 +669,12 @@ In `station.toml`, set `tlm_port` to the base Nano's COM port. Then:
   - no packets for `tlm_stale_s`, separately for the top box (`tower telemetry lost`) and the supply box (`tower-base supply box lost`)
   - supply below `v_min_alert` or above `v_max_alert` (checked at each INA226, labeled `at tower base` or `tower-top`), current above `i_max_alert` or below `i_min_alert`, or an INA226 not answering
   - supply box at or above `box_temp_warn_c`
+  - **MKU transmitting but no PA output** (MON at or above `mon_tx_mv`, PA sense below `pa_tx_mv`, for `pa_silent_s`). The alert says whether the key line to the sequencer was asserted: if it was, look at the sequencer and PA; if not, the MKU isn't keying them (its PTT out or the pin 8 wiring). Needs tower firmware 0.6.0
+  - **Key line stuck keyed:** asserted continuously for `ptt_stuck_s` (default 120 s; set it longer than your longest transmission). The alert includes the supply current and the PA heatsink temperature, which both climb when the PA stays keyed
 - **TX summary:** when you drop PTT, the client prints `last TX: PA peak … W | supply min … V, peak … A`.
 - **Signal strength:** with base firmware 0.5.0 or later, the dashboard's tower and supply-box cards show a "Signal at shack" line: the latest RSSI, the 5-minute average and worst case, and the margin over the noise floor. The margin is shown as a warning below 10 dB. The cloud summary has the same figures.
-- **CSV log:** every reading is also logged to `remkey-tlm.csv`, which gives you temperature, voltage and current history: one row per top-box packet, or per supply-box packet while the top box is silent. `supply_at` says where the voltage was measured (`base` or `top`), and `top_v_avg` holds the top voltage when both boxes measure. The station log records each transverter reply.
+- **Key line:** the dashboard's tower card shows "Key line (MKU pin 8)": keyed or not, its voltage, and how long it's been keyed. The cloud summary and `tlmview` show it too.
+- **CSV log:** every reading is also logged to `remkey-tlm.csv`, which gives you temperature, voltage and current history: one row per top-box packet, or per supply-box packet while the top box is silent. `supply_at` says where the voltage was measured (`base` or `top`). `top_v_avg` holds the top voltage when both boxes measure. `key_line` and `key_line_v` hold the key-line state and voltage. The station log records each transverter reply.
 
 ### Web dashboard
 

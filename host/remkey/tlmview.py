@@ -98,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
 
             temp = "/".join("n/a" if t is None else f"{t:.1f}" for t in (p.temp_c, p.temp2_c)) + " C"
             lock = {None: "lock n/a", True: "REF LOCK", False: "REF UNLOCK"}[p.lock]
+            if p.ptt is not None:
+                lock += f"  key {'KEYED' if p.ptt else 'off'} {p.ptt_v:.2f} V"
             print(f"{time.strftime('%H:%M:%S')} #{p.seq:<5d} PA pk {fmt(pa_cal, p.pa_pk_mv)}"
                   f"  avg {fmt(pa_cal, p.pa_avg_mv)}  XV {fmt(xv_cal, p.xv_pk_mv)}"
                   f"  {temp}  {lock}  loss {stats.loss_pct_5min():.1f}%")

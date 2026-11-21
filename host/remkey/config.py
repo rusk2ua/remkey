@@ -30,6 +30,11 @@ class StationConfig:
     temp2_warn_c: float = 50.0                     # probe 2 (MKU case: 55 C max, TX off at 65)
     temp_names: list = field(default_factory=lambda: ["PA heatsink", "transverter case"])
     tlm_stale_s: float = 10.0
+    # key line to the sequencer (MKU CON1 pin 8, tower firmware 0.6.0+)
+    mon_tx_mv: int = 500            # MKU MON at or above this = the transverter is transmitting
+    pa_tx_mv: int = 150             # PA sense below this = no PA output
+    pa_silent_s: float = 3.0        # MKU transmitting, PA silent this long -> alert; 0 = off
+    ptt_stuck_s: float = 120.0      # key line held keyed this long -> alert; 0 = off
     tlm_csv: str = "remkey-tlm.csv"
     # --- supply monitor (INA226 in the tower-base supply box, and/or the top box) ---
     base_supply_v: float = 14.1      # what the supply is set to (used when only the top box measures)

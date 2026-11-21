@@ -64,6 +64,17 @@ temp2_warn_c = 50.0
 # Alert if no packet arrives for this long (tower-top box and supply box, separately)
 tlm_stale_s = 10.0
 
+# Key line to the sequencer (MKU CON1 pin 8, tower firmware 0.6.0 or later).
+# "PA silent": the MKU's MON shows output (>= mon_tx_mv) but the PA sense shows
+#   none (< pa_tx_mv) for pa_silent_s. The alert says whether the key line was
+#   asserted: yes = look at the sequencer and PA; no = the MKU isn't keying them.
+# "Key line stuck": keyed continuously for ptt_stuck_s (set it longer than your
+#   longest transmission, e.g. a 60 s Q65 period). 0 turns either one off.
+mon_tx_mv = 500
+pa_tx_mv = 150
+pa_silent_s = 3.0
+ptt_stuck_s = 120.0
+
 # One row per packet, for heatsink-temperature history etc. Empty = off.
 tlm_csv = "remkey-tlm.csv"
 

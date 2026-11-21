@@ -21,6 +21,7 @@ from pathlib import Path
 
 TEMP_NONE = -32768
 LOCK_DISABLED = 2
+PTT_DISABLED = 2
 
 
 @dataclass
@@ -34,6 +35,8 @@ class Packet:
     temp2_c: float | None      # probe 2
     uptime_s: int
     call: str
+    ptt: bool | None = None    # MKU key line (CON1 pin 8) keyed during the interval; None = not monitored
+    ptt_v: float | None = None  # its voltage at the end of the interval
 
 
 SRC_TOP = "top"      # $RP: INA226 in the tower-top box (optional), seq shared with $RT
@@ -102,12 +105,16 @@ def parse_any(line: str):
     try:
         if body.startswith("RT,"):
             f = body.split(",")
-            if len(f) != 10:
+            if len(f) not in (10, 12):           # 12: tower 0.6.0+ adds ptt, ptt_mv
                 return None
+            ptt = ptt_v = None
+            if len(f) == 12 and int(f[9]) != PTT_DISABLED:
+                ptt, ptt_v = f[9] == "1", int(f[10]) / 1000.0
             return Packet(
                 seq=int(f[1]), pa_pk_mv=int(f[2]), pa_avg_mv=int(f[3]), xv_pk_mv=int(f[4]),
                 lock=None if int(f[5]) == LOCK_DISABLED else f[5] == "1",
-                temp_c=_temp(f[6]), temp2_c=_temp(f[7]), uptime_s=int(f[8]), call=f[9],
+                temp_c=_temp(f[6]), temp2_c=_temp(f[7]), uptime_s=int(f[8]), call=f[-1],
+                ptt=ptt, ptt_v=ptt_v,
             )
         if body.startswith("RP,"):
             f = body.split(",")
@@ -151,8 +158,10 @@ def format_packet(p: Packet) -> str:
     t1 = TEMP_NONE if p.temp_c is None else int(round(p.temp_c * 10))
     t2 = TEMP_NONE if p.temp2_c is None else int(round(p.temp2_c * 10))
     lock = LOCK_DISABLED if p.lock is None else int(p.lock)
+    ptt = PTT_DISABLED if p.ptt is None else int(p.ptt)
+    ptt_mv = 0 if p.ptt_v is None else round(p.ptt_v * 1000)
     return _seal(f"RT,{p.seq},{p.pa_pk_mv},{p.pa_avg_mv},{p.xv_pk_mv},{lock},"
-                 f"{t1},{t2},{p.uptime_s},{p.call}")
+                 f"{t1},{t2},{p.uptime_s},{ptt},{ptt_mv},{p.call}")
 
 
 def format_power(p: PowerPacket) -> str:
@@ -403,7 +412,7 @@ class CsvLog:
     HEADER = ["time", "seq", "pa_pk_mv", "pa_avg_mv", "pa_pk_w", "pa_avg_w",
               "xv_pk_mv", "ref_lock", "temp1_c", "temp2_c", "uptime_s",
               "supply_at", "box_temp_c", "top_v_avg",
-              "v_avg", "v_min", "v_max", "i_avg", "i_min", "i_max"]
+              "v_avg", "v_min", "v_max", "i_avg", "i_min", "i_max", "key_line", "key_line_v"]
 
     def __init__(self, path: str):
         self.path = Path(path)
@@ -438,4 +447,6 @@ class CsvLog:
                      "" if p.temp_c is None else p.temp_c,
                      "" if p.temp2_c is None else p.temp2_c, p.uptime_s]
         with self.path.open("a", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow([time.strftime("%Y-%m-%d %H:%M:%S"), *tower, *supply, *power])
+            key = (["", ""] if p is None or p.ptt is None
+                   else [int(p.ptt), "" if p.ptt_v is None else f"{p.ptt_v:.2f}"])
+            csv.writer(f).writerow([time.strftime("%Y-%m-%d %H:%M:%S"), *tower, *supply, *power, *key])

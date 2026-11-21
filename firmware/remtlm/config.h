@@ -49,6 +49,7 @@
 #define PIN_PA_SENSE   A0   // PA power-sense output (0-5 V) via divider
 #define PIN_XV_SENSE   A1   // MKU 10 G5 CON1 pin 9 MON via divider
 #define PIN_LO_LOCK    A2   // MKU 10 G5 CON1 pin 16 LD (3.3 V = locked), read as analog
+#define PIN_PTT_SENSE  A3   // MKU CON1 pin 8 PTT out (active low, to the sequencer) via network
 #define PIN_XV_RX      11   // Nano RX  <- level shifter <- MKU CON1 pin 11 TXD
 #define PIN_XV_TX      12   // Nano TX  -> level shifter -> MKU CON1 pin 12 RXD
 
@@ -67,6 +68,15 @@
 #define LOCK_MONITOR      1
 #define LOCK_ACTIVE_HIGH  1
 #define LOCK_THRESHOLD_MV 1650   // at the pin (no divider on A2)
+
+// MKU 10 G5 CON1 pin 8: PTT out to the sequencer, active low. The tower only
+// watches it, never drives it. Network (RK-302 Rev B, prototype rows 12-13):
+//   line -> 100k to +5 V (so an open line reads high, ~2 V, not "keyed")
+//   line -> 47k -> A3 -> 22k + 100 nF to GND   (safe up to ~15 V on the line)
+// PTT_DIVIDER_X1000 = (47k + 22k) / 22k x1000, to report volts on the line.
+#define PTT_SENSE           1
+#define PTT_DIVIDER_X1000   3136UL
+#define PTT_ASSERT_MV       1000     // line below this = keyed
 
 // ---------------------------------------------------------------------------
 // Kuhne MKU 10 G5 serial interface (3.3 V, 9600 8N1). Read-only: the tower

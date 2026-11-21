@@ -3,6 +3,28 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-20 (remtlm 0.6.0, host 0.10.0)
+
+### remtlm firmware
+- The tower watches the key line to the sequencer: MKU CON1 pin 8, PTT out, active
+  low, on A3 through a 100k pull-up and a 47k/22k divider (safe to about 15 V, open
+  line reads "not keyed"). `$RT` gains two fields before the callsign: `ptt` (1 =
+  keyed at any point in the interval, 0 = not, 2 = not monitored) and `ptt_mv` (line
+  voltage). A change goes out right away. Base and PSU behavior is unchanged.
+
+### Host
+- Parses both the old 10-field and the new 12-field `$RT`.
+- New alerts: "MKU transmitting but NO PA output" (MON at or above `mon_tx_mv`, PA
+  sense below `pa_tx_mv`, for `pa_silent_s`), which says whether the key line was
+  asserted, so you know whether to look at the sequencer/PA or the MKU; and "key line
+  held KEYED" after `ptt_stuck_s`, with the supply current and PA heatsink temperature.
+- The dashboard, cloud summary and `tlmview` show the key line; the CSV log gains
+  `key_line` and `key_line_v` (an older log file is set aside and a new one started).
+
+### Docs
+- Tower prototype: the key-line network takes rows 12-13. The PTC moves into the
+  +13.8 V lead, and the DS18B20 pull-up to the Nano carrier's D5/5V terminals.
+
 ## 2026-11-20 (tower prototype)
 
 ### Docs

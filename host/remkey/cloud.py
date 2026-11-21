@@ -241,6 +241,10 @@ def summary_html(st: dict) -> str:
                                f"{_f(t['loss_pct'], 1)}% loss over 5 min"),
             ("PA output", pa),
             ("10 MHz reference", lock),
+            ("Key line to the sequencer (MKU pin 8)",
+             "not monitored" if t.get("ptt") is None else
+             f"{'KEYED' if t['ptt'] else 'not keyed'}, {_f(t.get('ptt_v'), 2, ' V')}"
+             + (f", keyed for {t['key_held_s']} s" if t.get("key_held_s") else "")),
             (f"{_cap(names[0])} temperature", _f(t.get("temp_c"), 1, " C")),
             (f"{_cap(names[1])} temperature", _f(t.get("temp2_c"), 1, " C")),
         ]

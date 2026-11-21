@@ -510,7 +510,8 @@ def build_state(svc, public: bool = False) -> dict:
         "limits": {"v_min_alert": cfg.v_min_alert, "v_max_alert": cfg.v_max_alert,
                    "i_max_alert": cfg.i_max_alert, "i_min_alert": cfg.i_min_alert,
                    "temp_warn_c": cfg.temp_warn_c, "temp2_warn_c": cfg.temp2_warn_c,
-                   "box_temp_warn_c": cfg.box_temp_warn_c, "stale_s": cfg.tlm_stale_s},
+                   "box_temp_warn_c": cfg.box_temp_warn_c, "stale_s": cfg.tlm_stale_s,
+                   "ptt_stuck_s": cfg.ptt_stuck_s},
         "telemetry": svc.tlm is not None,
     }
     hub = svc.tlm
@@ -540,7 +541,9 @@ def build_state(svc, public: bool = False) -> dict:
     lt = hub.latest
     st["tower"] = None if lt is None else {
         **{k: lt.get(k) for k in ("pa_pk_w", "pa_avg_w", "pa_pk_mv", "pa_avg_mv", "xv_pk_mv",
-                                  "xv_pk_w", "lock", "temp_c", "temp2_c", "temp_names", "uptime_s")},
+                                  "xv_pk_w", "lock", "temp_c", "temp2_c", "temp_names", "uptime_s",
+                                  "ptt", "ptt_v")},
+        "key_held_s": round(now - hub.key_since) if hub.key_since is not None else None,
         "age_s": round(hub.stats.age_s() or 0.0, 1), "stale": hub.stale,
         "loss_pct": round(hub.stats.loss_pct_5min(), 1), "received": hub.stats.received,
         "lost": hub.stats.lost, "resets": hub.stats.resets,

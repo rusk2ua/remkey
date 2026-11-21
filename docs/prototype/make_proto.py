@@ -125,9 +125,10 @@ class Drawing:
         y = y if y is not None else self.y0
         for i, ln in enumerate(lines):
             self.el.append(f'<text x="{x}" y="{y + i * 22}" class="note">{escape(ln)}</text>')
+        self.min_h = max(getattr(self, "min_h", 0), y + len(lines) * 22 + 20)
 
     def svg(self):
-        h = self.y0 + 17 * U + 120
+        h = max(self.y0 + 17 * U + 120, getattr(self, "min_h", 0))
         head = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{self.w}" height="{h}" viewBox="0 0 {self.w} {h}" '
                 f'font-family="DejaVu Sans, Arial, sans-serif">'
                 '<style>.lab{font-size:13px;fill:#cfd8e6;text-anchor:middle}.sm{font-size:13px}.tiny{font-size:11px}'
@@ -342,7 +343,7 @@ TOWER_STRIPS = {
     (6, "R"): "5V", (7, "R"): "GND",
     (8, "L"): "LD", (8, "R"): "GND", (9, "L"): "PA_SENSE", (9, "R"): "A0",
     (10, "L"): "GND", (10, "R"): "GND", (11, "L"): "MON", (11, "R"): "A1",
-    (12, "L"): "VIN", (12, "R"): "VFUSED", (13, "L"): "DQ", (13, "R"): "5V",
+    (12, "L"): "PTT_LINE", (12, "R"): "A3", (13, "L"): "5V", (13, "R"): "GND",
     (14, "L"): "XV_TXD", (15, "L"): "XV_RXD", (16, "L"): "3V3", (17, "L"): "GND",
     (14, "R"): "XV_RX", (15, "R"): "XV_TX", (16, "R"): "5V", (17, "R"): "GND",
 }
@@ -387,8 +388,6 @@ def tower_board():
     for h, lab, c in (("G6", "OUT+", COL["5v"]), ("G7", "OUT-", COL["gnd"]), ("H7", "IN-", COL["gnd"])):
         nc.use(h, net(h), f"buck {lab}")
         d.pin(h, "", c)
-    nc.use("G12", net("G12"), "buck IN+")
-    d.pin("G12", "", COL["14v"])
 
     # analog inputs
     two("E8", "F8", "100k LD pull-down")
@@ -408,11 +407,15 @@ def tower_board():
     two("J11", "J10", "100nF A1")
     d.cap("J11", "J10", "")
 
-    # power, DS18B20, 100 uF
-    two("E12", "F12", "PTC")
-    d.resistor("E12", "F12", "", color="#c9a400", standing=True)
-    two("E13", "F13", "4.7k DQ pull-up")
-    d.resistor("E13", "F13", "", standing=True)
+    # key line to the sequencer (MKU CON1 pin 8) -> A3
+    two("E12", "F12", "47k PTT")
+    d.resistor("E12", "F12", "", standing=True)
+    two("D12", "D13", "100k PTT pull-up")
+    d.resistor("D12", "D13", "", standing=True)
+    two("G12", "G13", "22k A3")
+    d.resistor("G12", "G13", "", standing=True)
+    two("H12", "H13", "100nF A3")
+    d.cap("H12", "H13", "")
     two("I16", "I17", "100uF")
     d.cap("I16", "I17", "", polar=True)
 
@@ -444,14 +447,14 @@ def tower_board():
     under("B17", "C10", COL["gnd"])
     under("G17", "C17", COL["gnd"])
     under("J6", "J16", COL["5v"])
-    under("H16", "J13", COL["5v"])
+    under("H16", "A13", COL["5v"])
+    under("H17", "J13", COL["gnd"])
 
     # field wires, left edge
     left = [("A8", "MKU CON1 16  LD", COL["sense"]), ("B8", None, None),
             ("A9", "PA power sense", COL["sense"]), ("A10", "MKU CON1 15  GND", COL["gnd"]),
             ("B10", "PA GND", COL["gnd"]), ("A11", "MKU CON1 9  MON", COL["sense"]),
-            ("A12", "+13.8 V in", COL["14v"]), ("A13", "probe 1 DQ (yellow)", COL["probe"]),
-            ("B13", "probe 2 DQ (yellow)", COL["probe"]), ("A14", "MKU CON1 11  TXD", COL["sense"]),
+            ("A12", "MKU CON1 8  PTT out", COL["sense"]), ("A14", "MKU CON1 11  TXD", COL["sense"]),
             ("A15", "MKU CON1 12  RXD", COL["sense"]), ("A17", "supply GND in", COL["gnd"])]
     for h, lab, c in left:
         if lab is None:
@@ -461,21 +464,21 @@ def tower_board():
     # Nano wires, right edge
     right = [("J1", "Nano D9   (M0)"), ("J2", "Nano D10  (M1)"), ("J3", "Nano D8   (to RXD)"),
              ("J4", "Nano D7   (from TXD)"), ("J5", "Nano D6   (AUX)"), ("I8", "Nano GND"),
-             ("J9", "Nano A0   (PA)"), ("G11", "Nano A1   (MON)"), ("J14", "Nano D11  (MKU RX)"),
+             ("J9", "Nano A0   (PA)"), ("G11", "Nano A1   (MON)"), ("J12", "Nano A3   (key line)"),
+             ("J14", "Nano D11  (MKU RX)"),
              ("J15", "Nano D12  (MKU TX)"), ("G16", "Nano 5V")]
     for h, lab in right:
         nc.use(h, net(h), lab)
         c = COL["5v"] if "5V" in lab else COL["gnd"] if "GND" in lab else COL["nano"]
         d.wire(h, lab, c, "r", lane=0.0 if h[0] == "J" else -0.5)
-    for h, lab, lane in (("B8", "Nano A2  (LD)", 0.5), ("C13", "Nano D5  (DS18B20)", 0.5),
-                         ("A16", "Nano 3V3  (shifter LV)", 0.0)):
+    for h, lab, lane in (("B8", "Nano A2  (LD)", 0.5), ("A16", "Nano 3V3  (shifter LV)", 0.0)):
         nc.use(h, net(h), lab)
         d.wire(h, lab, COL["nano"], "l", lane=lane)
     # probe power on the right half
-    for h, lab, c in (("G13", "probe 1 red", COL["5v"]), ("H13", "probe 2 red", COL["5v"]),
-                      ("H17", "probe 1 black", COL["gnd"]), ("J17", "probe 2 black", COL["gnd"])):
+    for h, lab, c, side in (("B13", "probe 1 red", COL["5v"], "l"), ("C13", "probe 2 red", COL["5v"], "l"),
+                            ("I13", "probe 2 black", COL["gnd"], "r"), ("J17", "probe 1 black", COL["gnd"], "r")):
         nc.use(h, net(h), lab)
-        d.wire(h, lab, c, "r", lane=0.0 if h[0] == "J" else 0.5)
+        d.wire(h, lab, c, side, lane=0.0 if h[0] in "AJ" else 0.5 if side == "r" else -0.5)
 
     # outlines: E220 over rows 1-8 and past the right edge; buck over F1-J7
     xa, ya = d.xy("A1")
@@ -496,21 +499,27 @@ def tower_board():
             "  gap E1-F1, E2-F2, E3-F3. Jumpers E4-F4 (TXD), E5-F5 (AUX),",
             "  E6-F6 (+5 V), E7-F7 (GND), J7-J8 (GND). 100 nF flat I6-I7.",
             "Buck: foam tape over F1-J7, under the E220. Short wires:",
-            "  OUT+ G6, OUT- G7, IN- H7, IN+ G12. Solder everything under",
-            "  it first, and leave the wire ends at J1-J5 long.",
+            "  OUT+ G6, OUT- G7, IN- H7. Solder everything under it",
+            "  first, and leave the wire ends at J1-J5 long.",
+            "+13.8 V: PTC (0.5 A) in line in the lead, heat-shrunk,",
+            "  straight to the buck's IN+ pad. Supply GND -> A17.",
             "Analog: PA sense -> A9, 10k E9-F9, 22k G9-G10, 100 nF H9-H10.",
             "  MON -> A11, 10k E11-F11, 22k I11-I10, 100 nF J11-J10.",
             "  LD -> A8, 100k flat E8-F8 (row 8 is under the E220 edge).",
             "  Row 10 is GND, both halves (jumper E10-F10).",
-            "Power: +13.8 V -> A12, PTC standing E12-F12, G12 -> buck IN+.",
-            "  Supply GND -> A17. 100 uF I16 (+) to I17.",
-            "DS18B20 x2: DQ A13, B13; red G13, H13; black H17, J17.",
-            "  4.7k E13-F13 (row 13 right is +5 V).",
+            "Key line (MKU pin 8) -> A12: 47k E12-F12, 100k D12-D13",
+            "  (pull-up), 22k G12-G13, 100 nF H12-H13, J12 -> Nano A3.",
+            "  Row 13: +5 V on the left, GND on the right.",
+            "DS18B20 x2: red B13, C13; black J17, I13. Both yellow",
+            "  wires to the Nano's D5 terminal, with the 4.7k",
+            "  between the carrier's D5 and 5V terminals.",
+            "100 uF I16 (+) to I17.",
             "BSS138 shifter in a socket cut to 2 x 4: LV1 D14, LV2 D15,",
             "  LV D16, GND D17; HV1 F14 ... GND F17. Its LV3/LV4 end",
             "  hangs past row 17 (no holes there).",
             "Dashed lines: insulated wire on the underside:",
-            "  G8-D10, B17-C10, G17-C17 (GND); J6-J16, H16-J13 (+5 V)."],
+            "  G8-D10, B17-C10, G17-C17, H17-J13 (GND);",
+            "  J6-J16, H16-A13 (+5 V)."],
            x=d.x0 + 11 * U + 400, y=d.y0 - 20)
     used = len(nc.holes)
     return d, used

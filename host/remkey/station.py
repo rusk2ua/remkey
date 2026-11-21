@@ -98,6 +98,8 @@ class TelemetryHub:
         self.base_time = 0.0
         self.base_up = True
         self.signal = SignalStats()                  # RSSI per box and noise floor, from the base
+        self.key_since: float | None = None          # MKU key line keyed continuously since
+        self.silent_since: float | None = None       # MKU transmitting with the PA silent since
         self.pwr_flags: dict[str, bool] = {}
         # for the web dashboard
         self.alerts: deque[dict] = deque(maxlen=200)
@@ -168,6 +170,8 @@ class TelemetryHub:
             "temp_names": self.temp_names,
             "uptime_s": p.uptime_s,
             "loss_pct": round(self.stats.loss_pct_5min(), 1),
+            "ptt": p.ptt,
+            "ptt_v": p.ptt_v,
         }
         now = time.time()
         pa_pk = pa_pk_w if pa_pk_w is not None else p.pa_pk_mv
@@ -183,6 +187,7 @@ class TelemetryHub:
             self.lock_ok = p.lock
             self._alert("ok" if p.lock else "warn",
                         "10 MHz reference locked" if p.lock else "10 MHz reference UNLOCKED")
+        self._key_line_alerts(p, now)
         for i, (t, warn) in enumerate(((p.temp_c, self.cfg.temp_warn_c),
                                        (p.temp2_c, self.cfg.temp2_warn_c))):
             if t is None:
@@ -195,6 +200,53 @@ class TelemetryHub:
                 self.hot[i] = False
                 self._alert("ok", f"{name} back to {t:.1f} C")
         self.notify(self.latest)
+
+    # ------------------------------------------------------------ key line to the sequencer
+    def _context(self) -> str:
+        """Supply current and PA heatsink, for alert messages."""
+        bits = []
+        box = self.box if (self.box is not None and not self.box_stale and self.box.ok) else None
+        if box is not None:
+            bits.append(f"supply {box.i_avg:.2f} A")
+        elif self.pwr is not None and self.pwr.ok:
+            bits.append(f"top supply {self.pwr.i_avg:.2f} A")
+        if self.latest and self.latest.get("temp_c") is not None:
+            bits.append(f"{self.temp_names[0]} {self.latest['temp_c']:.1f} C")
+        return f" ({', '.join(bits)})" if bits else ""
+
+    def _key_line_alerts(self, p: Packet, now: float) -> None:
+        cfg = self.cfg
+        # Key line held keyed: the sequencer and PA stay keyed (a stuck MKU PTT out,
+        # or a short on the line). The heatsink and the supply current climb too.
+        if p.ptt:
+            self.key_since = self.key_since or now
+        else:
+            self.key_since = None
+        held = now - self.key_since if self.key_since is not None else 0.0
+        if cfg.ptt_stuck_s:
+            self._flag("ptt_stuck", held >= cfg.ptt_stuck_s,
+                       f"MKU key line to the sequencer held KEYED for {held:.0f} s: "
+                       f"PA keyed continuously?{self._context()}",
+                       "MKU key line to the sequencer released")
+        # Transverter transmitting but no PA output: was the sequencer being keyed?
+        tx = p.xv_pk_mv >= cfg.mon_tx_mv
+        silent = tx and p.pa_pk_mv < cfg.pa_tx_mv
+        if silent:
+            self.silent_since = self.silent_since or now
+        else:
+            self.silent_since = None
+        if cfg.pa_silent_s:
+            on = self.silent_since is not None and now - self.silent_since >= cfg.pa_silent_s
+            if p.ptt is None:
+                why = "key line not monitored"
+            elif p.ptt:
+                why = "key line to the sequencer IS asserted: check the sequencer and PA"
+            else:
+                why = ("key line NOT asserted: the MKU isn't keying the sequencer "
+                       "(MKU PTT out or pin 8 wiring)")
+            self._flag("pa_silent", on,
+                       f"MKU transmitting (MON {p.xv_pk_mv} mV) but NO PA output; {why}{self._context()}",
+                       "PA output back" if tx else "MKU no longer transmitting")
 
     # ------------------------------------------------------------ supply monitor
     def _csv(self, p, pa_pk_w, pa_avg_w, pwr, top) -> None:

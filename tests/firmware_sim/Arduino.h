@@ -15,6 +15,7 @@
 #define A0 14
 #define A1 15
 #define A2 16
+#define A3 17
 #define PROGMEM
 #define F(s) (s)
 #define memcpy_P memcpy
@@ -23,12 +24,13 @@ struct SimState {
   uint32_t now = 0;
   int pinIn[32];        // what digitalRead returns
   int pinOut[32];       // last digitalWrite
+  int adc[32];          // what analogRead returns (default mid-scale)
   bool toneOn = false;
   // key-out transitions: (time, level)
   std::vector<std::pair<uint32_t, int>> keyLog;
   std::vector<std::pair<uint32_t, int>> pttLog;
   SimState() {
-    for (int i = 0; i < 32; i++) { pinIn[i] = HIGH; pinOut[i] = LOW; }
+    for (int i = 0; i < 32; i++) { pinIn[i] = HIGH; pinOut[i] = LOW; adc[i] = 512; }
   }
 };
 extern SimState sim;
@@ -37,7 +39,7 @@ inline uint32_t millis() { return sim.now; }
 inline void pinMode(int, int) {}
 inline int digitalRead(int p) { return sim.pinIn[p]; }
 void digitalWrite(int p, int v);
-inline int analogRead(int) { return 512; }
+inline int analogRead(int p) { return sim.adc[p & 31]; }
 inline void tone(int, unsigned int) { sim.toneOn = true; }
 inline void noTone(int) { sim.toneOn = false; }
 inline long map(long x, long a, long b, long c, long d) { return (x - a) * (d - c) / (b - a) + c; }

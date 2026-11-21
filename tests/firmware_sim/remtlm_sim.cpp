@@ -62,7 +62,7 @@ static void run(uint32_t ms) {
 
 [[maybe_unused]] static std::string rtLine(uint16_t seq) {
   char buf[TLM_MAX_LINE];
-  TlmData d = {seq, 100, 50, 0, 1, 250, 300, 60, "K2UA"};
+  TlmData d = {seq, 100, 50, 0, 1, 250, 300, 60, 0, 12000, "K2UA"};
   tlmFormat(buf, sizeof(buf), &d);
   return buf;
 }
@@ -80,7 +80,7 @@ static void testPsu() {
   ina.shunt = 1600;     // 4.0 mV across 3.75 mOhm = 1066 mA
   dallas.count = 1;
   boot();
-  CHECK(Serial.out.find("V:remtlm 0.5.0 psu") != std::string::npos, "version line: %s", Serial.out.c_str());
+  CHECK(Serial.out.find("V:remtlm 0.6.0 psu") != std::string::npos, "version line: %s", Serial.out.c_str());
   CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_DISABLED, "psu keeps the RSSI byte off");
   CHECK(Serial.out.find("I:INA226 ok") != std::string::npos, "INA226 found");
 
@@ -184,7 +184,7 @@ static void testTower() {
   ina.shunt = 2400;     // 6 mV -> 1600 mA
   dallas.count = 2;
   boot();
-  CHECK(Serial.out.find("V:remtlm 0.5.0 tower") != std::string::npos, "version line");
+  CHECK(Serial.out.find("V:remtlm 0.6.0 tower") != std::string::npos, "version line");
   CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_DISABLED, "tower keeps the RSSI byte off");
   CHECK(Serial.out.find("I:temperature probes=2") != std::string::npos, "two probes");
   run(4600);
@@ -204,6 +204,46 @@ static void testTower() {
   CHECK(Serial.out.find("INA226") == std::string::npos, "INA226 not probed");
 #endif
   for (auto &s : sent) CHECK(tlmValid(s.second.c_str()), "valid: %s", s.second.c_str());
+
+  // PTT key line (A3): mid-scale = 2.50 V at the pin = 7.85 V on the line: not keyed.
+  auto lastRt = [&]() {
+    std::string r;
+    for (auto &s : sent) if (s.second.rfind("$RT,", 0) == 0) r = s.second;
+    return r;
+  };
+  auto field = [](const std::string &ln, int k) {   // k-th comma field (0 = "$RT")
+    size_t a = 0;
+    for (int i = 0; i < k; i++) a = ln.find(',', a) + 1;
+    return ln.substr(a, ln.find(',', a) - a);
+  };
+  std::string rt = lastRt();
+  CHECK(field(rt, 9) == "0", "not keyed: %s", rt.c_str());
+  CHECK(field(rt, 10) == "7846", "line voltage 7846 mV: %s", rt.c_str());
+  // The line goes low: a packet goes out right away (not 0.5 s later), marked keyed.
+  size_t before = sent.size();
+  uint32_t t0 = sim.now;
+  sim.adc[A3] = 20;                     // 98 mV at the pin = 307 mV on the line
+  run(30);
+  bool quick = false;
+  for (size_t i = before; i < sent.size(); i++)
+    if (sent[i].second.rfind("$RT,", 0) == 0 && sent[i].first - t0 <= 15 && field(sent[i].second, 9) == "1")
+      quick = true;
+  CHECK(quick, "keying reported within 15 ms");
+  // A short key-down between packets is still caught: keyed at any point in the interval.
+  sim.adc[A3] = 512;
+  run(600);
+  sim.adc[A3] = 20;
+  run(20);
+  sim.adc[A3] = 512;
+  before = sent.size();
+  run(1200);
+  int keyed = 0;
+  for (size_t i = before; i < sent.size(); i++)
+    if (sent[i].second.rfind("$RT,", 0) == 0 && field(sent[i].second, 9) == "1") keyed++;
+  rt = lastRt();
+  CHECK(field(rt, 9) == "0", "released afterwards: %s", rt.c_str());
+  for (auto &s : sent) CHECK(tlmValid(s.second.c_str()), "valid: %s", s.second.c_str());
+  CHECK(keyed == 1, "the release packet still says keyed (keyed during its interval): %d", keyed);
 }
 #endif
 

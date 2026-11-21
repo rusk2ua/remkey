@@ -79,7 +79,8 @@ def test_firmware_packets_parse(tmp_path):
     assert out.returncode == 0, out.stdout
     lines = [ln for ln in out.stdout.splitlines() if ln.startswith("$RT")]
     pk = [parse_packet(ln) for ln in lines]
-    assert pk[0] == Packet(65535, 4987, 1234, 0, True, 45.2, 31.8, 86400, "K2UA")
+    assert pk[0] == Packet(65535, 4987, 1234, 0, True, 45.2, 31.8, 86400, "K2UA", ptt=True, ptt_v=0.21)
+    assert pk[1].ptt is False and pk[1].ptt_v == 12.65 and pk[2].ptt is None
     assert pk[1].temp_c is None and pk[1].temp2_c is None and pk[1].lock is False
     assert pk[1].xv_pk_mv == 2500
     assert pk[2].temp_c == -10.5 and pk[2].lock is None
@@ -182,7 +183,7 @@ async def test_station_forwards_and_alerts(station_tlm):
     rows = (tmp / "tlm.csv").read_text().splitlines()
     assert rows[0].startswith("time,seq") and len(rows) == 3
     assert rows[0].endswith("temp1_c,temp2_c,uptime_s,supply_at,box_temp_c,top_v_avg,"
-                            "v_avg,v_min,v_max,i_avg,i_min,i_max")
+                            "v_avg,v_min,v_max,i_avg,i_min,i_max,key_line,key_line_v")
     writer.close()
 
 
@@ -266,7 +267,7 @@ def test_csv_rotates_old_header(tmp_path):
     path = tmp_path / "tlm.csv"
     path.write_text("time,seq,pa_pk_mv\n1,2,3\n")
     CsvLog(str(path))
-    assert path.read_text().splitlines()[0].endswith("i_max")
+    assert path.read_text().splitlines()[0].endswith("i_max,key_line,key_line_v")
     assert len(list(tmp_path.glob("tlm.*.csv"))) == 1
 
 
@@ -293,7 +294,7 @@ async def test_station_power_merge_alerts_and_fit(tmp_path):
         assert m["drop_v"] == pytest.approx(0.80) and m["ok"]
         tlink.inject(pkt(seq=1, pa=0))
         row = (tmp_path / "tlm.csv").read_text().splitlines()[1].split(",")
-        assert row[-6:] == ["13.300", "13.300", "13.300", "4.000", "4.000", "4.000"]
+        assert row[-8:-2] == ["13.300", "13.300", "13.300", "4.000", "4.000", "4.000"]
 
         # low voltage and high current alerts, then recovery
         assert "link up" in (await next_of("alert"))["msg"]   # from the first $RT
@@ -431,7 +432,8 @@ async def test_station_supply_box_only_then_with_top(tmp_path):
         # the tower is silent, so the box logs its own rows
         row = (tmp_path / "tlm.csv").read_text().splitlines()[1].split(",")
         assert row[1] == "1" and row[2] == "" and row[11:14] == ["base", "21.5", ""]
-        assert row[-6:] == ["14.050", "14.050", "14.050", "1.100", "1.100", "1.100"]
+        assert row[-8:-2] == ["14.050", "14.050", "14.050", "1.100", "1.100", "1.100"]
+        assert row[-2:] == ["", ""]                          # no tower row: no key-line columns
 
         # alerts from the box: low voltage at the base, high current, hot box, INA226 gone
         tlink.inject(box(seq=2, v=13.2, vmin=12.8, i=5.0, imax=7.4, temp=47.0))
@@ -463,7 +465,7 @@ async def test_station_supply_box_only_then_with_top(tmp_path):
         await next_of("tlm", lambda m: m["seq"] == 51)
         last = (tmp_path / "tlm.csv").read_text().splitlines()[-1].split(",")
         assert last[1] == "51" and last[11:14] == ["base", "20.0", "13.200"]
-        assert last[-6:-3] == ["14.000", "14.000", "14.000"]
+        assert last[-8:-5] == ["14.000", "14.000", "14.000"]
         writer.close()
     finally:
         await svc.stop()
@@ -557,3 +559,68 @@ def test_signal_stats_window_and_worst_case():
     # after 5 minutes the old readings drop out of the window, but the latest stays
     snap = s.snapshot(now=420.0)
     assert snap["tower"]["n"] == 0 and snap["tower"]["avg"] is None and snap["tower"]["dbm"] == -90
+
+
+# --- key line to the sequencer (tower firmware 0.6.0) ------------------------
+
+def test_rt_with_and_without_key_line():
+    old = format_packet(Packet(1, 100, 50, 0, True, 30.0, 25.0, 10, "K2UA"))
+    p = parse_packet(old)                                    # no key-line info: sent as "not monitored"
+    assert p.ptt is None
+    assert p == Packet(1, 100, 50, 0, True, 30.0, 25.0, 10, "K2UA")
+    body = "RT,2,100,50,0,1,300,250,11,1,210,K2UA"           # keyed, 0.21 V
+    from remkey.telemetry import _seal
+    q = parse_packet(_seal(body))
+    assert q.ptt is True and q.ptt_v == 0.21 and q.call == "K2UA"
+    q = parse_packet(_seal("RT,3,100,50,0,1,300,250,12,2,0,K2UA"))
+    assert q.ptt is None and q.ptt_v is None                 # not monitored
+    q = parse_packet(_seal("RT,4,100,50,0,1,300,250,13,K2UA"))  # pre-0.6.0 tower: 10 fields
+    assert q.ptt is None and q.uptime_s == 13
+    assert parse_packet(_seal("RT,4,100,50,0,1,300,250,13,1,K2UA")) is None   # 11: malformed
+    r = Packet(5, 0, 0, 900, True, 40.0, 30.0, 20, "K2UA", ptt=False, ptt_v=12.65)
+    assert parse_packet(format_packet(r)) == r
+
+
+async def test_key_line_alerts(station_tlm, monkeypatch):
+    svc, _, _, _ = station_tlm
+    hub = svc.tlm
+    from remkey import station as st_mod
+    from remkey.telemetry import _seal
+    clock = [1000.0]
+    monkeypatch.setattr(st_mod.time, "time", lambda: clock[0])
+
+    def rt(seq, pa=0, mon=0, ptt=2, ptt_mv=0, up=None):
+        hub.on_line(_seal(f"RT,{seq},{pa},{pa},{mon},1,400,300,{up or seq},{ptt},{ptt_mv},K2UA"))
+
+    def msgs():
+        return [a["msg"] for a in hub.alerts]
+
+    # MKU transmitting, PA silent, key line asserted -> blame the sequencer/PA side
+    for k in range(5):
+        rt(k + 1, pa=20, mon=2000, ptt=1, ptt_mv=150)
+        clock[0] += 1.0
+    hit = [m for m in msgs() if "NO PA output" in m]
+    assert len(hit) == 1 and "IS asserted" in hit[0]
+    rt(6, pa=3000, mon=2000, ptt=1, ptt_mv=150)              # PA comes up
+    assert "PA output back" in msgs()[-1]
+    rt(7, pa=0, mon=0, ptt=0, ptt_mv=12600)
+    clock[0] += 1.0
+
+    # same, but the key line is NOT asserted -> the MKU isn't keying the sequencer
+    for k in range(5):
+        rt(8 + k, pa=20, mon=2000, ptt=0, ptt_mv=12600)
+        clock[0] += 1.0
+    hit = [m for m in msgs() if "NO PA output" in m]
+    assert len(hit) == 2 and "NOT asserted" in hit[1]
+    rt(13, pa=0, mon=0, ptt=0, ptt_mv=12600)
+    assert "MKU no longer transmitting" in msgs()[-1]
+
+    # key line held keyed past ptt_stuck_s (120 s default), with PA output: stuck alert
+    for k in range(13):
+        rt(14 + k, pa=3000, mon=2000, ptt=1, ptt_mv=150)
+        clock[0] += 10.0
+    stuck = [m for m in msgs() if "held KEYED" in m]
+    assert len(stuck) == 1 and "PA heatsink 40.0 C" in stuck[0]
+    rt(40, pa=0, mon=0, ptt=0, ptt_mv=12600)
+    assert "released" in msgs()[-1]
+    assert hub.latest["ptt"] is False and hub.latest["ptt_v"] == 12.6
