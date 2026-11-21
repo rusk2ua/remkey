@@ -3,6 +3,13 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-20 (tower checklist)
+
+### Docs
+- `docs/prototype/tower-checklist.pdf` and `.xlsx`: a 67-step assembly checklist for the
+  tower-top prototype board, in build order, with meter and power-up checks.
+  `make_checklist.py` regenerates both.
+
 ## 2026-11-20 (remtlm 0.6.1)
 
 ### remtlm firmware

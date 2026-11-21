@@ -36,7 +36,7 @@ The shack E220 board as built: E220 pins in E10–E16 (M0 in E10 … GND in E16;
 
 ![Tower-top board](proto-tower-board.png)
 
-Everything for the tower node is on one board, so the build order matters:
+Everything for the tower node is on one board, so the build order matters. The full step-by-step checklist, with meter checks, is in [tower-checklist.pdf](tower-checklist.pdf) (print it for the bench) and [tower-checklist.xlsx](tower-checklist.xlsx); `make_checklist.py` regenerates both. In short:
 
 1. **Flat parts first, everything under the E220 and the buck:** the 2k and 1k dividers, the jumpers E4–F4, E5–F5, E6–F6, E7–F7, J7–J8, the 100 nF at I6–I7, the 100k at E8–F8, and the Nano wires at J1–J5 (leave them long). Nothing in rows 1–8 may stand taller than a resistor lying flat.
 2. **The underside links** (dashed in the drawing), in insulated wire: G8–D10, B17–C10, G17–C17, H17–J13 (GND) and J6–J16, H16–A13 (+5 V).
@@ -181,4 +181,4 @@ The level shifter's low side takes its 3.3 V from the Nano's 3V3 pin (A16). It d
 6. **Tower-top Nano.** Expect `V:remtlm … tower`, then `C:written` once and `C:ok ch=77 …`, `I:temperature probes=2` (fewer if they're not connected), a `$RT` line every 2 s, and `$RK` lines from the MKU poll.
 7. **Over the air.** With the nodes running, the shack dashboard and the cloud summary page show their readings within a few seconds. With the tower running, the supply box sends its `$RS` in the tower's gaps (`I:tower heard`).
 
-Regenerate the drawings: `python3 docs/prototype/make_proto.py docs/prototype`, then convert each SVG to PNG.
+Regenerate the drawings: `python3 docs/prototype/make_proto.py docs/prototype`, then convert each SVG to PNG. The tower checklist: `python3 docs/prototype/make_checklist.py docs/prototype`.
