@@ -319,15 +319,15 @@ The station runs about one character behind you, so pressing PTT off right after
 
 ### Audio
 
-The receive audio path is independent of remkey. AnyDesk's own audio transmission carries it one way (radio → shack PC → Mac); this setup is verified on the IC-7610:
+The receive audio path is independent of remkey. AnyDesk's own audio transmission carries it one way (radio → shack PC → Mac); this setup is verified on the IC-7610, on Windows 10 and on Windows 11 with AnyDesk 9. Open the classic Sound panel with **Win+R → `mmsys.cpl`** (Windows 11: Settings → System → Sound → More sound settings).
 
-1. **Sound → Recording:** the 7610's input (e.g. *Microphone – 3- USB Audio CODEC*) → Properties → **Listen** → tick **Listen to this device**, playback through the PC's normal output.
+1. **Sound → Recording:** the 7610's input (e.g. *Microphone – 3- USB Audio CODEC*, or the name you gave it) → Properties → **Listen** → tick **Listen to this device**, playback through the default output chosen by name. **Leave it ticked permanently:** it isn't a test feature, it's the only thing that puts the radio's audio where AnyDesk can capture it. It's stored per device, so it doesn't survive a move to a new PC or a new USB port.
 2. **Sound → Playback:** the default (green check) is the PC's normal output, e.g. an HDMI monitor. It doesn't need speakers; it just has to show *Ready* / *Default Device*. **Never** make *Speakers – USB Audio CODEC* the default: that's the radio's transmit input.
 3. **AnyDesk on the shack PC → Settings → Audio:** **Audio Transmission = "Audio output of this device"**, not the radio's codec. (Pointing it at the codec sends the silent transmit side, so the Mac hears nothing.)
-4. **AnyDesk → Settings → Permissions:** "Hear my device's sound" ticked in both the **Unattended Access** and **Default** profiles.
+4. **AnyDesk → Settings → Permissions** (AnyDesk 9: **Settings → Access**): "Hear my device's sound" ticked in both the **Unattended Access** and **Default** profiles.
 5. **Restart AnyDesk on the shack PC and reconnect** after any audio change; a running session doesn't pick it up.
 
-Quick check: play a YouTube video on the shack PC. If you hear it on the Mac, the radio comes through the same way. If an HDMI monitor sleeps, Windows may drop its audio device, so set the display to never turn off. Before relying on it, confirm the radio's CW sidetone is present in the stream: key the rig locally with BK-IN off and listen.
+Quick check: play a YouTube video on the shack PC. If you hear it on the Mac but not the radio, the Listen box (step 1) is unticked or points at a different output. Don't go by the Playback tab's level meter: on AMD HDMI/DP audio (GMKtec G10) it stays flat even when audio is flowing; the Intel NUC's meter moved. Use the Recording tab meter to see the radio reaching the PC, and your ears on the Mac for the rest. If an HDMI monitor sleeps, Windows may drop its audio device, so set the display to never turn off. Before relying on it, confirm the radio's CW sidetone is present in the stream: key the rig locally with BK-IN off and listen.
 
 ### Safety layers
 
