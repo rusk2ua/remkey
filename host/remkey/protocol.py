@@ -9,7 +9,7 @@ Handshake:
     station -> client  {"t": "ok"}  (or {"t": "err", ...} and close)
 
 Client -> station after auth:
-    {"t": "cw", "text": "CQ K2UA"}      characters to send (sanitised station-side too)
+    {"t": "cw", "text": "CQ K2UA"}      characters to send (sanitized station-side too)
     {"t": "ptt", "on": true}            manual PTT (the TRANSMIT button)
     {"t": "wpm", "v": 18}               sending speed
     {"t": "tune", "ms": 5000}           key-down carrier, capped station-side

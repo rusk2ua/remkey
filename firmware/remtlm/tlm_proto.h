@@ -45,6 +45,28 @@
 //   part/total 1-based part number and part count
 //   text       reply text; line breaks become '|', and '$', '*' and ',' become ' '
 //
+// Dish elevation (TOWER with TILT_ENABLE, 0.7.0+): raw ADXL355 readings. Sent just
+// before each $RT (averaged over the interval), and every LIVE_PERIOD_MS while the
+// dish moves (averaged over that 200 ms):
+//   $RA,<seq>,<x>,<y>,<z>,<t_raw>,<ok>,<moving>,<call>*HH
+//
+//   seq        0..255, the tower's own $RA counter
+//   x, y, z    acceleration, 20-bit ADXL355 counts at +-2 g (256000 = 1 g, nominal)
+//   t_raw      ADXL355 temperature, 12-bit (1885 at 25 C, -9.05 per C, nominal)
+//   ok         1 = sensor answering; 0 = not found (all values 0, sent every 30 s)
+//   moving     1 = live mode (the dish is moving), 0 = still
+//
+// Box environment (TOWER with ENV_ENABLE, 0.7.0+): raw BME280 readings every 10 s,
+// just before a $RT, and the chip's calibration constants after boot and every 5 min.
+// The host does the Bosch compensation.
+//   $RB,<seq>,<p_raw>,<t_raw>,<h_raw>,<chip>,<ok>,<call>*HH
+//   $RC,<chip>,<cal>,<call>*HH
+//
+//   p_raw, t_raw  20-bit ADC values; h_raw 16-bit (0 on a BMP280)
+//   chip       96 = BME280 (chip id 0x60), 88 = BMP280 (0x58, no humidity)
+//   ok         1 = sensor answering; 0 = not found (values 0, sent every 30 s)
+//   cal        33 bytes in hex: registers 0x88-0xA1, then 0xE1-0xE7 (zeros on a BMP280)
+//
 // HH is the XOR of every byte between '$' and '*', two upper-case hex digits.
 //
 // The base also prints status lines of its own on USB (never sent over the air):
@@ -61,7 +83,8 @@
 #include <string.h>
 
 #define TLM_TEMP_NONE (-32768)
-#define TLM_MAX_LINE  96      // worst-case $RS is 80 bytes with CR/LF
+#define TLM_MAX_LINE  96      // worst-case $RC is 83 bytes and $RS 80, with CR/LF
+#define TLM_CAL_BYTES 33      // BME280 calibration: 0x88-0xA1 (26) + 0xE1-0xE7 (7)
 #define TLM_RK_TEXT   48      // reply text per $RK packet
 #define TLM_RK_LINE   (TLM_RK_TEXT + 40)
 
@@ -101,6 +124,24 @@ struct TlmData {
   uint32_t uptimeS;
   uint8_t  ptt;
   uint16_t pttMv;
+  const char *call;
+};
+
+struct TiltData {
+  uint8_t  seq;
+  int32_t  x, y, z;
+  uint16_t tRaw;
+  uint8_t  ok;
+  uint8_t  moving;
+  const char *call;
+};
+
+struct EnvData {
+  uint8_t  seq;
+  uint32_t pRaw, tRaw;
+  uint16_t hRaw;
+  uint8_t  chip;
+  uint8_t  ok;
   const char *call;
 };
 
@@ -148,7 +189,39 @@ static inline int tlmFormatSupply(char *buf, size_t len, const SupData *d) {
   return tlmSeal(buf, len, n);
 }
 
-// Writes one $RK line for text[0..textLen). Text must already be sanitised.
+// Writes a complete $RA line including "\r\n". Returns its length, or 0.
+static inline int tlmFormatTilt(char *buf, size_t len, const TiltData *d) {
+  int n = snprintf(buf, len, "$RA,%u,%ld,%ld,%ld,%u,%u,%u,%s", (unsigned)d->seq, (long)d->x,
+                   (long)d->y, (long)d->z, (unsigned)d->tRaw, (unsigned)d->ok,
+                   (unsigned)d->moving, d->call);
+  if (n <= 0 || (size_t)n >= len) return 0;
+  return tlmSeal(buf, len, n);
+}
+
+// Writes a complete $RB line including "\r\n". Returns its length, or 0.
+static inline int tlmFormatEnv(char *buf, size_t len, const EnvData *d) {
+  int n = snprintf(buf, len, "$RB,%u,%lu,%lu,%u,%u,%u,%s", (unsigned)d->seq,
+                   (unsigned long)d->pRaw, (unsigned long)d->tRaw, (unsigned)d->hRaw,
+                   (unsigned)d->chip, (unsigned)d->ok, d->call);
+  if (n <= 0 || (size_t)n >= len) return 0;
+  return tlmSeal(buf, len, n);
+}
+
+// Writes a complete $RC line (BME280 calibration, TLM_CAL_BYTES in hex). Returns its length, or 0.
+static inline int tlmFormatEnvCal(char *buf, size_t len, uint8_t chip, const uint8_t *cal,
+                                  const char *call) {
+  static const char hex[] = "0123456789ABCDEF";
+  int n = snprintf(buf, len, "$RC,%u,", (unsigned)chip);
+  if (n <= 0 || (size_t)n + 2 * TLM_CAL_BYTES + strlen(call) + 8 > len) return 0;
+  for (uint8_t i = 0; i < TLM_CAL_BYTES; i++) {
+    buf[n++] = hex[cal[i] >> 4];
+    buf[n++] = hex[cal[i] & 0x0F];
+  }
+  n += snprintf(buf + n, len - (size_t)n, ",%s", call);
+  return tlmSeal(buf, len, n);
+}
+
+// Writes one $RK line for text[0..textLen). Text must already be sanitized.
 static inline int tlmFormatReply(char *buf, size_t len, uint8_t id, char cmd, uint8_t part,
                                  uint8_t total, const char *text, size_t textLen,
                                  const char *call) {
@@ -176,12 +249,12 @@ static inline int tlmHexNibble(char c) {
   return -1;
 }
 
-// True if line (without CR/LF) is a $RT, $RP, $RS or $RK packet with a correct checksum.
+// True if line (without CR/LF) is a $RT, $RP, $RS, $RK, $RA, $RB or $RC packet with a
+// correct checksum.
 static inline bool tlmValid(const char *line) {
   size_t n = strlen(line);
-  if (n < 8 || line[0] != '$') return false;
-  if (strncmp(line, "$RT,", 4) != 0 && strncmp(line, "$RK,", 4) != 0 &&
-      strncmp(line, "$RP,", 4) != 0 && strncmp(line, "$RS,", 4) != 0) return false;
+  if (n < 8 || line[0] != '$' || line[1] != 'R' || line[3] != ',') return false;
+  if (!strchr("TPSKABC", line[2])) return false;
   if (line[n - 3] != '*') return false;
   int hi = tlmHexNibble(line[n - 2]), lo = tlmHexNibble(line[n - 1]);
   if (hi < 0 || lo < 0) return false;

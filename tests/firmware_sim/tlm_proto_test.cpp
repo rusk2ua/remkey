@@ -53,6 +53,60 @@ int main() {
     if (!tlmValid(big)) { fails++; std::printf("FAIL supply valid\n"); }
   }
 
+  // dish elevation ($RA): about +1 deg, a negative axis, the worst case that must fit
+  TiltData td = {12, 4466, -1200, 255961, 1840, 1, 0, "K2UA"};
+  if (tlmFormatTilt(buf, sizeof(buf), &td) <= 0) { fails++; std::printf("FAIL tilt format\n"); }
+  std::printf("%s", buf);
+  td = {13, 0, 0, 0, 0, 0, 0, "K2UA"};            // sensor not found
+  tlmFormatTilt(buf, sizeof(buf), &td);
+  std::printf("%s", buf);
+  {
+    TiltData worst = {255, -524288, -524288, -524288, 4095, 1, 1, "K2UA"};
+    char big[TLM_MAX_LINE];
+    int m = tlmFormatTilt(big, sizeof(big), &worst);
+    if (m <= 0 || m > 56) { fails++; std::printf("FAIL worst-case tilt length %d\n", m); }
+    big[strcspn(big, "\r\n")] = 0;
+    if (!tlmValid(big)) { fails++; std::printf("FAIL tilt valid\n"); }
+  }
+
+  // box environment ($RB, $RC). Pressure/temperature calibration and readings are the
+  // worked example in Bosch's BMP280 datasheet (25.08 C, 100653.27 Pa); the humidity
+  // constants are typical BME280 values.
+  {
+    const int16_t pt[12] = {27504, 26435, -1000, (int16_t)36477, -10685, 3024, 2855, 140, -7, 15500, -14600, 6000};
+    uint8_t cal[TLM_CAL_BYTES] = {};
+    for (int i = 0; i < 12; i++) { cal[2 * i] = (uint8_t)(pt[i] & 0xFF); cal[2 * i + 1] = (uint8_t)((uint16_t)pt[i] >> 8); }
+    cal[25] = 75;                                   // dig_H1 (0xA1)
+    int16_t h2 = 362, h4 = 313, h5 = 50;
+    cal[26] = (uint8_t)(h2 & 0xFF); cal[27] = (uint8_t)(h2 >> 8);   // 0xE1-0xE2
+    cal[28] = 0;                                    // dig_H3
+    cal[29] = (uint8_t)(h4 >> 4);                   // 0xE4: H4[11:4]
+    cal[30] = (uint8_t)(((h5 & 0x0F) << 4) | (h4 & 0x0F));   // 0xE5
+    cal[31] = (uint8_t)(h5 >> 4);                   // 0xE6: H5[11:4]
+    cal[32] = 30;                                   // dig_H6
+    char big[TLM_MAX_LINE];
+    int m = tlmFormatEnvCal(big, sizeof(big), 96, cal, "K2UA");
+    if (m <= 0 || m > 83) { fails++; std::printf("FAIL env cal length %d\n", m); }
+    std::printf("%s", big);
+    big[strcspn(big, "\r\n")] = 0;
+    if (!tlmValid(big)) { fails++; std::printf("FAIL env cal valid\n"); }
+  }
+  EnvData ed = {3, 415148, 519888, 27000, 96, 1, "K2UA"};
+  if (tlmFormatEnv(buf, sizeof(buf), &ed) <= 0) { fails++; std::printf("FAIL env format\n"); }
+  std::printf("%s", buf);
+  ed = {4, 0, 0, 0, 0, 0, "K2UA"};                  // sensor not found
+  tlmFormatEnv(buf, sizeof(buf), &ed);
+  std::printf("%s", buf);
+  {
+    EnvData worst = {255, 1048575, 1048575, 65535, 96, 1, "K2UA"};
+    char big[TLM_MAX_LINE];
+    int m = tlmFormatEnv(big, sizeof(big), &worst);
+    if (m <= 0 || m > 56) { fails++; std::printf("FAIL worst-case env length %d\n", m); }
+    big[strcspn(big, "\r\n")] = 0;
+    if (!tlmValid(big)) { fails++; std::printf("FAIL env valid\n"); }
+  }
+  if (tlmValid("$RX,1,2,K2UA*00")) { fails++; std::printf("FAIL unknown type accepted\n"); }
+
   // validator on its own output and on corrupted copies
   buf[strcspn(buf, "\r\n")] = 0;
   if (!tlmValid(buf)) { fails++; std::printf("FAIL valid\n"); }
@@ -63,7 +117,7 @@ int main() {
   char tiny[20];
   if (tlmFormat(tiny, sizeof(tiny), &d) != 0) { fails++; std::printf("FAIL tiny buffer\n"); }
 
-  // transverter reply relay: sanitise like the tower does, then split into parts
+  // transverter reply relay: sanitize like the tower does, then split into parts
   const char *raw = "MKU 10 G5\r\nIF RX: 028 MHz, IF TX: 028 MHz\r\nRF RX $10368* RF TX 10368\r\nD1 50 D2 50 D3 50 D4 50\r\nREF PLL locked\r\n";
   char text[240];
   size_t n = 0;

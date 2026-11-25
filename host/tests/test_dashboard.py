@@ -5,12 +5,25 @@ import json
 import time
 
 import pytest
+from test_sensors import cal_bytes, tilt_counts
 
 from remkey.config import StationConfig
 from remkey.dashboard import Dashboard, History, host_allowed, parse_allow, peer_allowed
 from remkey.serial_link import FakeLink
 from remkey.station import StationService
-from remkey.telemetry import CsvLog, Packet, PowerPacket, format_packet, format_supply
+from remkey.telemetry import (
+    CsvLog,
+    EnvCalPacket,
+    EnvPacket,
+    Packet,
+    PowerPacket,
+    TiltPacket,
+    format_env,
+    format_env_cal,
+    format_packet,
+    format_supply,
+    format_tilt,
+)
 
 SECRET = "test-secret-0123456789"
 
@@ -134,6 +147,7 @@ async def dash(tmp_path):
     await d.start()
     svc.dashboard = d
     svc.tlm.on_alert = d.push_alert
+    svc.tlm.on_elev = d.push_elev
     try:
         yield svc, tlink, d
     finally:
@@ -247,3 +261,30 @@ async def test_station_starts_dashboard_and_survives_port_in_use(tmp_path):
     finally:
         await svc.stop()
         blocker.close()
+
+
+async def test_dish_and_box_environment(dash):
+    svc, tlink, d = dash
+    reader, writer = await asyncio.open_connection("127.0.0.1", d.port)
+    writer.write(f"GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{d.port}\r\n\r\n".encode())
+    await writer.drain()
+    buf = b""
+    while b"event: state" not in buf:
+        buf += await asyncio.wait_for(reader.read(4096), 3)
+    x, y, z = tilt_counts(4.0)
+    tlink.inject(format_tilt(TiltPacket(1, x, y, z, 1885, True, True, "K2UA")))
+    while b"event: elev" not in buf:                      # pushed at once, not with the 1 s state
+        buf += await asyncio.wait_for(reader.read(4096), 3)
+    assert b'"moving":true' in buf
+    writer.close()
+    tlink.inject(format_env_cal(EnvCalPacket(96, cal_bytes(), "K2UA")))
+    tlink.inject(format_env(EnvPacket(1, 415148, 519888, 27000, 96, True, "K2UA")))
+    await asyncio.sleep(0.05)
+    st = json.loads((await http(d.port, "GET", "/api/state"))[2])
+    assert st["dish"]["deg"] == pytest.approx(4.0, abs=0.001) and st["dish"]["moving"] is True
+    assert st["dish"]["calibrated"] is False and st["dish"]["cal_points"] == 0
+    assert st["env"]["temp_c"] == pytest.approx(25.08, abs=0.01) and st["env"]["age_s"] < 5
+    assert st["limits"]["elev_max_deg"] == 22.0 and st["limits"]["env_rh_warn"] == 85.0
+    hist = json.loads((await http(d.port, "GET", "/api/history?minutes=5&points=50"))[2])
+    assert hist["dish"]["elev"] == [pytest.approx(4.0, abs=0.001)]
+    assert hist["env"]["air"] == [pytest.approx(25.08, abs=0.01)]

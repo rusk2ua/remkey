@@ -5,6 +5,10 @@
 
 Stop the station service first (it owns the port), or point this at the tower
 or supply-box Nano's own USB port on the bench: each prints every packet it sends.
+
+Dish elevation lines show the raw angle (what goes into elev_cal in station.toml)
+next to the calibrated one: hold the inclinometer on the dish rim, read both, and
+write the pair down.
 """
 
 from __future__ import annotations
@@ -14,14 +18,18 @@ import sys
 import time
 
 from .config import load_station
+from .sensors import Bme280Cal, Elevation, adxl_temp_c, dew_point_c
 from .telemetry import (
     SRC_BASE,
     Calibration,
+    EnvCalPacket,
+    EnvPacket,
     LinkStats,
     Packet,
     PowerPacket,
     ReplyAssembler,
     ReplyPart,
+    TiltPacket,
     parse_any,
     parse_signal,
 )
@@ -38,10 +46,13 @@ def main(argv: list[str] | None = None) -> int:
 
     pa_cal = xv_cal = Calibration([])
     v_scale = i_scale = 1.0
+    elev = Elevation()
     if args.config:
         cfg = load_station(args.config)
         pa_cal, xv_cal = Calibration(cfg.pa_cal), Calibration(cfg.xv_cal)
         v_scale, i_scale = cfg.v_scale, cfg.i_scale
+        elev = Elevation(cfg.elev_axis, cfg.elev_cal, cfg.elev_tc_deg_per_c, cfg.elev_t_ref_c)
+    env_cal: Bme280Cal | None = None
 
     stats = LinkStats()
     box_stats = LinkStats()
@@ -64,6 +75,32 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{time.strftime('%H:%M:%S')} transverter '{cmd}':")
                     for ln in text.splitlines():
                         print(f"      {ln}")
+                continue
+            if isinstance(p, TiltPacket):
+                now = time.strftime("%H:%M:%S")
+                if not p.ok:
+                    print(f"{now}        elevation sensor (ADXL355) NOT FOUND")
+                    continue
+                raw = elev.raw(p.x, p.y, p.z)
+                t = adxl_temp_c(p.t_raw)
+                g = (p.x * p.x + p.y * p.y + p.z * p.z) ** 0.5 / 256000
+                cal = f"{elev.degrees(raw, t):7.3f} deg" if elev.calibrated else "  (no elev_cal)"
+                print(f"{now}        elevation raw {raw:8.4f} deg  {cal}  sensor {t:5.1f} C  {g:.3f} g"
+                      + ("  MOVING" if p.moving else ""))
+                continue
+            if isinstance(p, EnvCalPacket):
+                env_cal = Bme280Cal.from_bytes(p.chip, p.cal)
+                continue
+            if isinstance(p, EnvPacket):
+                now = time.strftime("%H:%M:%S")
+                if not p.ok:
+                    print(f"{now}        box air sensor (BME280) NOT FOUND")
+                elif env_cal is None or env_cal.chip != p.chip:
+                    print(f"{now}        box air: waiting for the sensor's calibration (every 5 min)")
+                else:
+                    t, hpa, rh = env_cal.compensate(p.p_raw, p.t_raw, p.h_raw)
+                    hum = "" if rh is None else f"  {rh:4.1f}% RH  dew point {dew_point_c(t, rh):5.1f} C"
+                    print(f"{now}        box air {t:5.1f} C  {hpa or 0:7.1f} hPa{hum}")
                 continue
             if isinstance(p, PowerPacket):
                 base = p.src == SRC_BASE

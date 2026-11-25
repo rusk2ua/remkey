@@ -151,6 +151,10 @@ box's link loss stays near zero overnight.
 - [ ] Capture an `s` reply and send it over for parsing / serial reference-PLL alert
 - [ ] Optional top-box INA226 (`PWR_ENABLE 1`): R100 removed, shunt wired and insulated, tower prints `I:INA226 ok`, readings match a DMM
 - [ ] With the supply box running too: its `$RS` packets follow each tower `$RT` (`tlmview`), no extra loss on either link
+- [ ] Elevation and box air sensors (remtlm 0.7.0; Rev A: the sensor board in `docs/prototype`): with nothing plugged in, row 4 of the sensor board reads 3.3 V left / 5 V right
+- [ ] Tower prints `I:ADXL355 ok` and `I:BME280 ok` (not `BMP280`, which has no humidity); `tlmview` shows `elevation raw` at about 1.000 g and `box air` lines
+- [ ] Tilt the sensor plate by hand: `MOVING` appears within 0.4 s, `$RA` every 200 ms, and stops about 3 s after it's still; the supply box's `$RS` keeps arriving meanwhile
+- [ ] Dashboard: the dial follows the plate smoothly; the "moving" badge lights
 
 **Done when:** `tlmview` shows sensible readings, both temperatures, lock state and the
 MKU's replies, with near-zero packet loss on the bench.
@@ -174,7 +178,19 @@ MKU's replies, with near-zero packet loss on the bench.
 - [ ] Enter `pa_cal` (and `xv_cal` for MON) in `station.toml`
 - [ ] Ctrl-P watts agree with the meter across the range
 
-**Done when:** Ctrl-P shows watts that agree with the meter.
+- [ ] Dish elevation (once the sensor plate is on the frame): `elev_axis` set; inclinometer pairs at the 0° stop and a few angles across the range
+
+  | Inclinometer (°) | Raw angle (°) |
+  |---|---|
+  | 0 (stop) | |
+  | 5 | |
+  | 10 | |
+  | 20 | |
+
+- [ ] Enter `elev_cal`; the dashboard shows the fit within a few hundredths of a degree
+- [ ] After a few weeks parked on the stop through changing weather: `python -m remkey.elevfit remkey-tlm.csv --config station.toml`; enter `elev_tc_deg_per_c` and `elev_t_ref_c`
+
+**Done when:** Ctrl-P shows watts that agree with the meter, and the elevation agrees with the inclinometer.
 
 ---
 
@@ -191,7 +207,8 @@ MKU's replies, with near-zero packet loss on the bench.
 - [ ] With the top INA226, Ctrl-V: top voltage at receive current ________ V at ________ A; measured cable drop ________ V
 - [ ] With the top INA226, after some transmitting: cable loop resistance ________ mΩ (#10 ≈ 200, #12 ≈ 318)
 - [ ] Lowest tower voltage on transmit stays above 12.0 V (MKU rating): lowest seen ________ V (estimated from the table without a top INA226)
-- [ ] Alerts tested: unplug a probe, interrupt the 10 MHz reference, power-cycle the tower Nano, unplug an INA226
+- [ ] ADXL355 plate bolted to the dish frame (its own stiff plate); BME280 in the box away from the buck
+- [ ] Alerts tested: unplug a probe, interrupt the 10 MHz reference, power-cycle the tower Nano, unplug an INA226, unplug the elevation sensor lead
 
 **Done when:** the link holds overnight with negligible loss, and alerts fire correctly.
 

@@ -36,20 +36,23 @@ b.text("MKU 10 G5 CON1", 29.0, 1.2, 0.8)
 b.text("PA", 48.25, 1.2, 0.8)
 
 # ---------------------------------------------------------------- BSS138 4-channel shifter
-# module rotated 180 deg: LV row on top (towards the MKU wires), HV row below; LVn sits above HVn
+# module rotated 180 deg: LV row on top (toward the MKU wires), HV row below; LVn sits above HVn
 lv = ["LV4", "LV3", "GND", "LV", "LV2", "LV1"]
 hv = ["HV4", "HV3", "GND", "HV", "HV2", "HV1"]
-b.row("U3", 28.0, 17.0, lv, {"LV1": "XV_TXD", "LV2": "XV_RXD", "LV": "+3V3", "GND": "GND"},
+# Rev B: channels 3 and 4 carry the sensors' I2C (SDA, SCL) between the 3.3 V header and A4/A5.
+b.row("U3", 28.0, 17.0, lv, {"LV1": "XV_TXD", "LV2": "XV_RXD", "LV": "+3V3", "GND": "GND",
+                             "LV3": "SDA_3V3", "LV4": "SCL_3V3"},
       "BSS138 4ch shifter, LV row (1x6 socket)", square_first=False, label_dy=-1.6)
-b.row("U4", 28.0, 27.16, hv, {"HV1": "XV_RX", "HV2": "XV_TX", "HV": "+5V", "GND": "GND"},
+b.row("U4", 28.0, 27.16, hv, {"HV1": "XV_RX", "HV2": "XV_TX", "HV": "+5V", "GND": "GND",
+                              "HV3": "SDA", "HV4": "SCL"},
       "BSS138 4ch shifter, HV row (1x6 socket)", square_first=False, label_dy=1.6)
 b.rect(26.0, 15.9, 42.7, 28.3)
 b.text("LEVEL SHIFTER", 34.35, 22.1, 0.8)
 
-# ---------------------------------------------------------------- Nano, USB end towards the right-hand wall
+# ---------------------------------------------------------------- Nano, USB end toward the right-hand wall
 b.nano("U5", 95.0, 18.0, {"A0": "A0", "A1": "A1", "A2": "LD", "A3": "A3", "5V": "+5V", "GND": "GND",
                           "D5": "DQ", "D6": "AUX", "D7": "E_TXD", "D8": "D8", "D9": "D9", "D10": "D10",
-                          "D11": "XV_RX", "D12": "XV_TX"})
+                          "D11": "XV_RX", "D12": "XV_TX", "A4": "SDA", "A5": "SCL"})
 
 # ---------------------------------------------------------------- analog inputs (above the Nano)
 # A0, A1: 10k in, 22k + 100nF to GND.  A2 (LD): 100k pull-down.
@@ -94,6 +97,18 @@ for ref, x, net, lab in (("W10", 35.5, "GND", "GND"), ("W11", 39.0, "DQ", "DQ"),
     b.text(lab, x, 46.6, 0.8)
 b.lib("R13", R, RV, 60.0, 42.0, {"1": "DQ", "2": "+5V"}, "4.7k")
 b.text("R13 4k7", 61.3, 39.6, 0.8)
+
+# ---------------------------------------------------------------- Rev B: sensor headers (3.3 V I2C)
+# Same pin order as the prototype sensor board, so one lead fits either: SDA, SCL, 3V3, GND.
+# J2: the ADXL355 plate on the dish frame. J3: the BME280 in the box.
+sens = ["SDA", "SCL", "3V3", "GND"]
+sens_nets = {"SDA": "SDA_3V3", "SCL": "SCL_3V3", "3V3": "+3V3", "GND": "GND"}
+b.row("J2", 12.0, 19.0, sens, sens_nets, "ADXL355 plate lead (1x4, 0.1in)")
+b.row("J3", 12.0, 25.0, sens, sens_nets, "BME280 lead (1x4, 0.1in)")
+for i, name in enumerate(sens):                     # pin names once, between the two rows
+    b.text(name, 12.0 + 2.54 * i, 22.0, 0.8)
+b.text("ELEV", 21.4, 19.0, 0.8, just="l")
+b.text("AIR", 21.4, 25.0, 0.8, just="l")
 
 for i, (x, y) in enumerate(((11.0, 4.5), (91.0, 4.5), (11.0, 47.5), (91.0, 47.5))):
     b.mount(f"H{i + 1}", x, y)

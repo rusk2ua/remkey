@@ -6,6 +6,9 @@ Packets (see firmware/remtlm/tlm_proto.h):
     $RS,<seq>,<v_avg>,<v_min>,<v_max>,<i_avg>,<i_min>,<i_max>,<ok>,<t_c10>,<uptime_s>,<call>*HH
                                                        tower-base supply box (own seq)
     $RK,<id>,<cmd>,<part>,<total>,<text>,<call>*HH     transverter serial reply, in parts
+    $RA,<seq>,<x>,<y>,<z>,<t_raw>,<ok>,<moving>,<call>*HH   dish elevation, raw ADXL355 (0.7.0+)
+    $RB,<seq>,<p_raw>,<t_raw>,<h_raw>,<chip>,<ok>,<call>*HH box environment, raw BME280 (0.7.0+)
+    $RC,<chip>,<33 bytes hex>,<call>*HH                    BME280 calibration constants (0.7.0+)
 """
 
 from __future__ import annotations
@@ -74,6 +77,42 @@ class ReplyPart:
     call: str
 
 
+@dataclass
+class TiltPacket:
+    """$RA: averaged raw ADXL355 counts (256000 = 1 g nominal) and its temperature."""
+
+    seq: int
+    x: int
+    y: int
+    z: int
+    t_raw: int
+    ok: bool           # False: sensor not found (values 0)
+    moving: bool       # live mode: sent every 200 ms while the dish moves
+    call: str
+
+
+@dataclass
+class EnvPacket:
+    """$RB: raw BME280 (or BMP280) ADC values."""
+
+    seq: int
+    p_raw: int
+    t_raw: int
+    h_raw: int
+    chip: int          # 96 = BME280, 88 = BMP280 (no humidity), 0 = not found
+    ok: bool
+    call: str
+
+
+@dataclass
+class EnvCalPacket:
+    """$RC: the BME280's 33 calibration bytes."""
+
+    chip: int
+    cal: bytes
+    call: str
+
+
 def xor_checksum(body: str) -> int:
     x = 0
     for ch in body.encode("ascii", errors="replace"):
@@ -98,7 +137,8 @@ def _temp(c10: str) -> float | None:
 
 
 def parse_any(line: str):
-    """Return a Packet, PowerPacket ($RP or $RS), ReplyPart, or None for anything else / bad checksum."""
+    """Return a Packet, PowerPacket ($RP or $RS), ReplyPart, TiltPacket, EnvPacket,
+    EnvCalPacket, or None for anything else / bad checksum."""
     body = _checked_body(line)
     if body is None:
         return None
@@ -138,6 +178,23 @@ def parse_any(line: str):
             text, _, call = head[5].rpartition(",")
             return ReplyPart(capture=int(head[1]), cmd=head[2], part=int(head[3]),
                              total=int(head[4]), text=text, call=call)
+        if body.startswith("RA,"):
+            f = body.split(",")
+            if len(f) != 9:
+                return None
+            return TiltPacket(seq=int(f[1]), x=int(f[2]), y=int(f[3]), z=int(f[4]), t_raw=int(f[5]),
+                              ok=f[6] == "1", moving=f[7] == "1", call=f[8])
+        if body.startswith("RB,"):
+            f = body.split(",")
+            if len(f) != 8:
+                return None
+            return EnvPacket(seq=int(f[1]), p_raw=int(f[2]), t_raw=int(f[3]), h_raw=int(f[4]),
+                             chip=int(f[5]), ok=f[6] == "1", call=f[7])
+        if body.startswith("RC,"):
+            f = body.split(",")
+            if len(f) != 4 or len(f[2]) != 66:
+                return None
+            return EnvCalPacket(chip=int(f[1]), cal=bytes.fromhex(f[2]), call=f[3])
     except ValueError:
         return None
     return None
@@ -178,8 +235,23 @@ def format_supply(p: PowerPacket) -> str:
                  f"{p.uptime_s or 0},{p.call}")
 
 
+def format_tilt(p: TiltPacket) -> str:
+    """Inverse of parse_any for $RA (tests and the bench simulator)."""
+    return _seal(f"RA,{p.seq},{p.x},{p.y},{p.z},{p.t_raw},{int(p.ok)},{int(p.moving)},{p.call}")
+
+
+def format_env(p: EnvPacket) -> str:
+    """Inverse of parse_any for $RB."""
+    return _seal(f"RB,{p.seq},{p.p_raw},{p.t_raw},{p.h_raw},{p.chip},{int(p.ok)},{p.call}")
+
+
+def format_env_cal(p: EnvCalPacket) -> str:
+    """Inverse of parse_any for $RC."""
+    return _seal(f"RC,{p.chip},{p.cal.hex().upper()},{p.call}")
+
+
 def format_reply(capture: int, cmd: str, text: str, call: str = "K2UA", chunk: int = 48) -> list[str]:
-    """Split a sanitised reply into $RK lines, as the tower does."""
+    """Split a sanitized reply into $RK lines, as the tower does."""
     parts = [text[i:i + chunk] for i in range(0, len(text), chunk)] or [""]
     return [_seal(f"RK,{capture},{cmd},{i + 1},{len(parts)},{t},{call}") for i, t in enumerate(parts)]
 
@@ -412,7 +484,8 @@ class CsvLog:
     HEADER = ["time", "seq", "pa_pk_mv", "pa_avg_mv", "pa_pk_w", "pa_avg_w",
               "xv_pk_mv", "ref_lock", "temp1_c", "temp2_c", "uptime_s",
               "supply_at", "box_temp_c", "top_v_avg",
-              "v_avg", "v_min", "v_max", "i_avg", "i_min", "i_max", "key_line", "key_line_v"]
+              "v_avg", "v_min", "v_max", "i_avg", "i_min", "i_max", "key_line", "key_line_v",
+              "elev_deg", "elev_raw_deg", "tilt_temp_c", "box_air_c", "box_rh", "box_hpa"]
 
     def __init__(self, path: str):
         self.path = Path(path)
@@ -426,8 +499,10 @@ class CsvLog:
                 csv.writer(f).writerow(self.HEADER)
 
     def write(self, p: Packet | None, pa_pk_w: float | None, pa_avg_w: float | None,
-              pwr: PowerPacket | None = None, top: PowerPacket | None = None) -> None:
-        """p None = supply-only row (tower silent). top = top-box reading when pwr is the base box's."""
+              pwr: PowerPacket | None = None, top: PowerPacket | None = None,
+              dish: dict | None = None) -> None:
+        """p None = supply-only row (tower silent). top = top-box reading when pwr is the base box's.
+        dish = latest elevation / box environment readings (keys as in CsvLog.HEADER), if any."""
         def f3(x):
             return f"{x:.3f}"
 
@@ -449,4 +524,9 @@ class CsvLog:
         with self.path.open("a", newline="", encoding="utf-8") as f:
             key = (["", ""] if p is None or p.ptt is None
                    else [int(p.ptt), "" if p.ptt_v is None else f"{p.ptt_v:.2f}"])
-            csv.writer(f).writerow([time.strftime("%Y-%m-%d %H:%M:%S"), *tower, *supply, *power, *key])
+            d = dish or {}
+            extra = [d.get("elev_deg"), d.get("elev_raw_deg"), d.get("tilt_temp_c"),
+                     d.get("box_air_c"), d.get("box_rh"), d.get("box_hpa")]
+            extra = ["" if v is None else (f"{v:.4f}" if k < 2 else f"{v:.2f}") for k, v in enumerate(extra)]
+            row = [time.strftime("%Y-%m-%d %H:%M:%S"), *tower, *supply, *power, *key, *extra]
+            csv.writer(f).writerow(row)

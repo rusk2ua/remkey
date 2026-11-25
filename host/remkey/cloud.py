@@ -248,6 +248,27 @@ def summary_html(st: dict) -> str:
             (f"{_cap(names[0])} temperature", _f(t.get("temp_c"), 1, " C")),
             (f"{_cap(names[1])} temperature", _f(t.get("temp2_c"), 1, " C")),
         ]
+    d = st.get("dish")
+    if d is not None:
+        if not d.get("ok"):
+            rows.append(("Dish elevation", "sensor (ADXL355) not answering"))
+        else:
+            cal = "calibrated" if d.get("calibrated") else "UNCALIBRATED (raw angle)"
+            rows.append(("Dish elevation (10/24 GHz frame)",
+                         f"{_f(d['deg'], 2, ' deg')} ({cal}; {'MOVING' if d.get('moving') else 'still'}; "
+                         f"reading {_f(d['age_s'], 0)} s before upload)"))
+    e = st.get("env")
+    if e is not None:
+        if not e.get("ok"):
+            rows.append(("Tower box air", "sensor (BME280) not answering"))
+        elif e.get("waiting"):
+            rows.append(("Tower box air", "waiting for the sensor's calibration"))
+        else:
+            txt = f"{_f(e['temp_c'], 1, ' C')}, {_f(e.get('hpa'), 1, ' hPa')}"
+            if e.get("rh") is not None:
+                txt += (f", {_f(e['rh'], 0, '% RH')}, dew point {_f(e.get('dew_c'), 1, ' C')} "
+                        f"({_f(e.get('margin_c'), 1, ' C')} margin)")
+            rows.append(("Tower box air", txt))
     sig = st.get("signal") or {}
     if any(sig.get(k) for k in ("tower", "psu", "noise")):
         noise = sig.get("noise")

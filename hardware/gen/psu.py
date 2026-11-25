@@ -32,7 +32,7 @@ b.wire("W4", 24.2, 24.6, 20, "SH_N", None)
 b.text("SHUNT-", 24.2, 27.3, 0.8)
 b.text("tower side", 24.2, 28.6, 0.8)
 
-# Nano, USB end towards the right-hand wall
+# Nano, USB end toward the right-hand wall
 b.nano("U3", 95.0, 18.0, {"A4": "SDA", "A5": "SCL", "5V": "+5V", "GND": "GND",
                           "D5": "DQ", "D6": "AUX", "D7": "E_TXD", "D8": "D8", "D9": "D9", "D10": "D10"})
 

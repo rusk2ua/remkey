@@ -9,6 +9,8 @@
 SimState sim;
 MockSerial Serial;
 InaSim ina;
+AdxlSim adxl;
+BmeSim bme;
 DallasSim dallas;
 TwoWire Wire;
 
@@ -80,7 +82,7 @@ static void testPsu() {
   ina.shunt = 1600;     // 4.0 mV across 3.75 mOhm = 1066 mA
   dallas.count = 1;
   boot();
-  CHECK(Serial.out.find("V:remtlm 0.6.1 psu") != std::string::npos, "version line: %s", Serial.out.c_str());
+  CHECK(Serial.out.find("V:remtlm 0.7.0 psu") != std::string::npos, "version line: %s", Serial.out.c_str());
   CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_DISABLED, "psu keeps the RSSI byte off");
   CHECK(Serial.out.find("I:INA226 ok") != std::string::npos, "INA226 found");
 
@@ -184,13 +186,26 @@ static void testTower() {
   ina.shunt = 2400;     // 6 mV -> 1600 mA
   dallas.count = 2;
   boot();
-  CHECK(Serial.out.find("V:remtlm 0.6.1 tower") != std::string::npos, "version line");
+  CHECK(Serial.out.find("V:remtlm 0.7.0 tower") != std::string::npos, "version line");
   CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_DISABLED, "tower keeps the RSSI byte off");
   CHECK(Serial.out.find("I:temperature probes=2") != std::string::npos, "two probes");
   run(4600);
   // the mock ADC reads mid-scale (~3.6 V PA sense), so the tower is in its 0.5 s "transmitting" rate
   CHECK(count("$RT,") == 9, "$RT every 0.5 s while the PA shows output: %d", count("$RT,"));
   CHECK(count("$RS,") == 0, "tower never sends $RS");
+#if TILT_ENABLE
+  // no sensors on the bus: one "not found" each at the first report, then every 30 s
+  CHECK(Serial.out.find("I:ADXL355 not found") != std::string::npos, "ADXL355 not found");
+  CHECK(Serial.out.find("I:BME280 not found") != std::string::npos, "BME280 not found");
+  CHECK(count("$RA,") == 1 && count("$RB,") == 1, "one not-found $RA/$RB: %d %d", count("$RA,"), count("$RB,"));
+  for (auto &s : sent)
+    if (s.second.rfind("$RA,", 0) == 0)
+      CHECK(s.second.find(",0,0,0,0,0,0,K2UA*") != std::string::npos, "$RA not found: %s", s.second.c_str());
+  CHECK(count("$RC,") == 0, "no calibration without a BME280");
+#else
+  CHECK(count("$RA,") == 0 && count("$RB,") == 0 && count("$RC,") == 0, "no sensor packets when disabled");
+  CHECK(Serial.out.find("ADXL355") == std::string::npos, "ADXL355 not probed");
+#endif
 #if PWR_ENABLE
   CHECK(Serial.out.find("I:INA226 ok") != std::string::npos, "INA226 found");
   CHECK(count("$RP,") == 9, "$RP before each $RT: %d", count("$RP,"));
@@ -267,6 +282,150 @@ static void testTower() {
 }
 #endif
 
+
+#if REMTLM_ROLE == ROLE_TOWER && TILT_ENABLE
+static std::string fieldOf(const std::string &ln, int k) {   // k-th comma field (0 = "$RA")
+  size_t a = 0;
+  for (int i = 0; i < k; i++) a = ln.find(',', a) + 1;
+  return ln.substr(a, ln.find_first_of(",*", a) - a);
+}
+
+// Dish elevation and box environment (0.7.0): sensors found by the retry, report
+// order, live mode with the supply-box guard, MKU polls deferred, drop-outs.
+static void testTowerSensors() {
+  std::printf("tower sensors (PWR_ENABLE=%d)\n", PWR_ENABLE);
+  sim.adc[A0] = 0;                          // PA quiet: one report every 2 s
+  sim.adc[A3] = 512;
+  adxl.present = true;
+  adxl.x = 4466;                            // about +1.0 deg
+  adxl.y = -1200;
+  adxl.z = 255961;
+  adxl.temp = 1840;
+  bme.present = true;
+  bme.chip = 0x60;
+  const uint8_t calHead[4] = {0x70, 0x6B, 0x43, 0x67};
+  for (int i = 0; i < 4; i++) bme.regs[0x88 + i] = calHead[i];
+  bme.regs[0xA1] = 75;
+  bme.regs[0xE7] = 30;
+  bme.set(415148, 519888, 27000);
+  Serial.out.clear();
+  sent.clear();
+  run(SENSOR_RETRY_MS + 100);
+  CHECK(Serial.out.find("I:ADXL355 ok") != std::string::npos, "ADXL355 found by the retry");
+  CHECK(Serial.out.find("I:BME280 ok") != std::string::npos, "BME280 found by the retry");
+  CHECK(adxl.regs[0x2D] == 0x00 && adxl.regs[0x2C] == 0x01 && adxl.regs[0x28] == TILT_ODR_LPF,
+        "ADXL355 set up: power %02X range %02X filter %02X", adxl.regs[0x2D], adxl.regs[0x2C], adxl.regs[0x28]);
+  sent.clear();
+  run(24000);
+  CHECK(bme.forced >= 2 && bme.ctrlHum == 0x01 && bme.ctrlMeas == 0x25,
+        "BME280 forced readings: %d, hum %02X meas %02X", bme.forced, bme.ctrlHum, bme.ctrlMeas);
+  CHECK(adxl.reads > 600, "ADXL355 read at ~31 Hz: %d in ~29 s", adxl.reads);
+  // order: whatever goes with a report precedes its $RT, and every $RT has a $RA before it
+  int rts = 0, withRa = 0;
+  for (size_t i = 0; i < sent.size(); i++) {
+    if (sent[i].second.rfind("$RT,", 0) != 0) continue;
+    rts++;
+    for (size_t j = i; j-- > 0 && sent[j].first == sent[i].first;)
+      if (sent[j].second.rfind("$RA,", 0) == 0) withRa++;
+  }
+  CHECK(rts >= 11 && withRa == rts, "a $RA with every $RT: %d of %d", withRa, rts);
+  int nb = count("$RB,"), nc = 0;
+  for (auto &s : sent) {
+    CHECK(tlmValid(s.second.c_str()), "valid: %s", s.second.c_str());
+    if (s.second.rfind("$RA,", 0) == 0) {
+      CHECK(fieldOf(s.second, 2) == "4466" && fieldOf(s.second, 3) == "-1200" && fieldOf(s.second, 4) == "255961" &&
+            fieldOf(s.second, 5) == "1840" && fieldOf(s.second, 6) == "1" && fieldOf(s.second, 7) == "0",
+            "$RA still: %s", s.second.c_str());
+    }
+    if (s.second.rfind("$RB,", 0) == 0)
+      CHECK(s.second.find(",415148,519888,27000,96,1,K2UA*") != std::string::npos, "$RB: %s", s.second.c_str());
+    if (s.second.rfind("$RC,96,706B4367", 0) == 0) nc++;
+  }
+  CHECK(nb >= 2 && nb <= 3, "$RB every 10 s: %d in 24 s", nb);
+  CHECK(nc == 0, "calibration went out once, before this window: %d", nc);
+  CHECK(Serial.out.find("$RC,96,706B4367") != std::string::npos, "$RC sent after the BME280 was found");
+
+  // Live mode: the dish moves for 2 s. Live $RA every 200 ms (moving=1), none in
+  // the guard after a $RT, and back to normal LIVE_HOLD_MS after it stops.
+  sent.clear();
+  uint32_t t0 = sim.now;
+  for (int i = 0; i < 20; i++) {
+    adxl.x += 400;                          // ~0.09 deg per 100 ms
+    run(100);
+  }
+  uint32_t tStop = sim.now;
+  run(LIVE_HOLD_MS + 2500);
+  int live = 0, inGuard = 0;
+  uint32_t lastRt = 0, firstLive = 0, lastLive = 0;
+  for (auto &s : sent) {
+    if (s.second.rfind("$RT,", 0) == 0) lastRt = s.first;
+    if (s.second.rfind("$RA,", 0) == 0 && fieldOf(s.second, 7) == "1") {
+      bool withRt = false;                  // the $RA that goes with a $RT is exempt
+      for (auto &q : sent) if (q.first == s.first && q.second.rfind("$RT,", 0) == 0) withRt = true;
+      if (withRt) continue;
+      live++;
+      if (!firstLive) firstLive = s.first;
+      lastLive = s.first;
+      if (lastRt && s.first - lastRt < LIVE_GUARD_MS) inGuard++;
+    }
+  }
+  CHECK(firstLive && firstLive - t0 <= 2 * LIVE_PERIOD_MS + 50, "live starts within two ticks: +%u", firstLive - t0);
+  CHECK(live >= 12, "live packets while moving and holding: %d", live);
+  CHECK(inGuard == 0, "no live packet inside the guard after a $RT: %d", inGuard);
+  CHECK(lastLive && lastLive - tStop <= LIVE_HOLD_MS + LIVE_PERIOD_MS + 50 && lastLive - tStop >= LIVE_HOLD_MS - LIVE_PERIOD_MS - LIVE_GUARD_MS,
+        "live ends LIVE_HOLD_MS after the last movement: +%u", lastLive - tStop);
+  CHECK(fieldOf(sent.back().second, 7) == "0" || sent.back().second.rfind("$RT,", 0) == 0, "still again");
+
+  // No MKU poll starts while the dish moves; the poll waits until it stops.
+  size_t polls = xvSerial.out.size();
+  uint32_t until = sim.now + XV_POLL_MS + 5000;
+  bool polledWhileLive = false;
+  while (sim.now < until) {
+    adxl.x = 4466 + (int32_t)((sim.now / 100) % 50) * 400;   // a slow sweep, ~0.09 deg per 100 ms
+    run(100);
+    if (xvSerial.out.size() != polls) polledWhileLive = true;
+  }
+  CHECK(!polledWhileLive, "no MKU poll while moving");
+  run(LIVE_HOLD_MS + 500);
+  CHECK(xvSerial.out.size() > polls, "the poll goes out once the dish is still");
+  run(XV_REPLY_MAX_MS + 500);
+
+  // ADXL355 drops off the bus: reported gone, $RA ok=0, then found again.
+  adxl.present = false;
+  sent.clear();
+  run(3000);
+  CHECK(Serial.out.find("I:ADXL355 not answering") != std::string::npos, "ADXL355 gone");
+  bool gone = false;
+  for (auto &s : sent) if (s.second.rfind("$RA,", 0) == 0 && fieldOf(s.second, 6) == "0") gone = true;
+  CHECK(gone, "$RA ok=0 once it is gone");
+  adxl.present = true;
+  Serial.out.clear();
+  sent.clear();
+  run(SENSOR_RETRY_MS + 2100);
+  CHECK(Serial.out.find("I:ADXL355 ok") != std::string::npos, "ADXL355 back");
+  CHECK(!sent.empty() && count("$RA,") >= 1, "$RA again");
+
+  // A BMP280 instead: chip 88, no humidity register writes, h_raw 0, calibration tail zero.
+  bme.present = false;
+  run(ENV_PERIOD_MS * (SENSOR_FAIL_LIMIT + 1) + 200);
+  CHECK(Serial.out.find("I:BME280 not answering") != std::string::npos, "BME280 gone");
+  bme.chip = 0x58;
+  bme.ctrlHum = 0;
+  bme.present = true;
+  Serial.out.clear();
+  sent.clear();
+  run(SENSOR_RETRY_MS + ENV_PERIOD_MS + 2500);
+  CHECK(Serial.out.find("I:BMP280 ok (no humidity)") != std::string::npos, "BMP280 found");
+  bool rc = false, rb = false;
+  for (auto &s : sent) {
+    if (s.second.rfind("$RC,88,", 0) == 0 && s.second.find("00000000000000,K2UA*") != std::string::npos) rc = true;
+    if (s.second.rfind("$RB,", 0) == 0 && s.second.find(",415148,519888,0,88,1,K2UA*") != std::string::npos) rb = true;
+  }
+  CHECK(rc && rb, "BMP280 packets: $RC %d $RB %d", rc, rb);
+  CHECK(bme.ctrlHum == 0, "no humidity register writes on a BMP280");
+}
+#endif
+
 #if REMTLM_ROLE == ROLE_BASE
 // Run until the base sends something on the LoRa port (the noise query), at most ms.
 static void runUntilSent(uint32_t ms) {
@@ -289,6 +448,17 @@ static void testBase() {
   CHECK(Serial.out.find(rtLine(1).substr(0, rtLine(1).size() - 2)) != std::string::npos, "$RT forwarded");
   CHECK(Serial.out.find(rs.substr(0, rs.size() - 2)) != std::string::npos, "$RS forwarded: %s", Serial.out.c_str());
   CHECK(Serial.out.find("E:bad packet #1") != std::string::npos, "bad packet counted");
+  {
+    TiltData td = {9, 4466, -1200, 255961, 1840, 1, 1, "K2UA"};
+    char ra[TLM_MAX_LINE];
+    tlmFormatTilt(ra, sizeof(ra), &td);
+    Serial.out.clear();
+    loraSerial.feed(std::string(ra) + std::string(1, (char)0xA8));
+    run(20);
+    std::string ras(ra);
+    CHECK(Serial.out.find(ras.substr(0, ras.size() - 2)) != std::string::npos, "$RA forwarded: %s", Serial.out.c_str());
+    CHECK(Serial.out.find("R:tower,-88") != std::string::npos, "$RA counts as the tower's: %s", Serial.out.c_str());
+  }
   CHECK(loraSerial.out.empty(), "base never transmits");
   CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_ENABLED, "base turns on the RSSI byte");
   CHECK(e220.cfg.OPTION.RSSIAmbientNoise == RSSI_AMBIENT_NOISE_ENABLED, "base turns on the noise register");
@@ -341,6 +511,9 @@ int main() {
   testPsu();
 #elif REMTLM_ROLE == ROLE_TOWER
   testTower();
+#if TILT_ENABLE
+  testTowerSensors();
+#endif
 #else
   testBase();
 #endif

@@ -108,6 +108,37 @@ i_max_alert = 0.0      # peak current above this
 i_min_alert = 0.0      # average current below this (something in the box lost power)
 
 # ---------------------------------------------------------------------------
+# Dish elevation (ADXL355 on the dish) and tower box air (BME280), tower firmware
+# 0.7.0+. README section 9, "Dish elevation and box environment".
+# ---------------------------------------------------------------------------
+# The sensor axis that points along the dish's boresight (printed on the breakout):
+# "x", "y" or "z", with a "-" if it points backwards. Roll about the boresight
+# doesn't matter.
+elev_axis = "x"
+# One-time calibration: [raw angle from the dashboard, inclinometer reading], at a
+# few angles across the range you use (e.g. the 0 deg stop, 5, 10, 20). One pair sets
+# the zero only; two or more also fit the scale. Empty = raw angle shown.
+elev_cal = [
+  # [0.31, 0.00],
+  # [5.42, 5.10],
+  # [10.29, 10.00],
+  # [20.33, 20.00],
+]
+# Temperature coefficient, fitted once from a few weeks parked at the stop:
+#   python -m remkey.elevfit remkey-tlm.csv --config station.toml
+elev_tc_deg_per_c = 0.0
+elev_t_ref_c = 25.0
+# Dashboard dial range
+elev_min_deg = -2.0
+elev_max_deg = 22.0
+
+# Tower box air: humidity alert (% RH) and condensation alert (air within this many
+# C of its dew point). 0 turns one off. env_altitude_m > 0 adds sea-level pressure.
+env_rh_warn = 85.0
+env_dew_margin_c = 3.0
+env_altitude_m = 0.0
+
+# ---------------------------------------------------------------------------
 # Web dashboard: live telemetry page for another computer or tablet in the
 # radio room (README section 9, "Web dashboard"). 0 = off.
 # Also allow the port through Windows Firewall once (see the README).

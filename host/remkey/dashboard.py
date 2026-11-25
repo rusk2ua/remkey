@@ -3,8 +3,9 @@
     http://<shack-pc>:8080/
 
 Open it in any browser on the home network (or over Tailscale). It shows the
-supply box and tower-top readings live, history charts, the transverter's status
-replies and the alert log.
+supply box and tower-top readings live, the dish elevation on a dial that follows
+the dish while it moves, history charts, the transverter's status replies and the
+alert log.
 
 Deliberately limited:
 - No route touches the keyer. The few buttons only clear the dashboard's alert
@@ -60,6 +61,8 @@ DEFAULT_ALLOW = [
 SUPPLY_FIELDS = ("t", "v_avg", "v_min", "v_max", "i_avg", "i_max", "temp")
 TOWER_FIELDS = ("t", "pa_pk", "pa_avg", "xv_pk", "lock", "t1", "t2")
 TOP_FIELDS = ("t", "v_avg", "v_min")
+DISH_FIELDS = ("t", "elev")
+ENV_FIELDS = ("t", "air", "rh")
 
 # How each field combines when several readings fall into one chart point.
 _AGG = {"v_min": "min", "v_max": "max", "i_max": "max", "pa_pk": "max", "xv_pk": "max",
@@ -74,6 +77,8 @@ class History:
         self.supply: deque[tuple] = deque()
         self.tower: deque[tuple] = deque()
         self.top: deque[tuple] = deque()
+        self.dish: deque[tuple] = deque()
+        self.env: deque[tuple] = deque()
         self.pa_unit = "W"                      # "mV" when the PA power isn't calibrated
 
     def _add(self, buf: deque, row: tuple) -> None:
@@ -98,6 +103,12 @@ class History:
         if p.ok:
             self._add(self.top, (t, p.v_avg, p.v_min))
 
+    def add_dish(self, t: float, elev: float) -> None:
+        self._add(self.dish, (t, elev))
+
+    def add_env(self, t: float, air: float | None, rh: float | None) -> None:
+        self._add(self.env, (t, air, rh))
+
     def query(self, minutes: float, points: int, now: float | None = None) -> dict:
         now = time.time() if now is None else now
         minutes = max(1.0, min(float(minutes), self.keep_s / 60.0))
@@ -109,6 +120,8 @@ class History:
             "supply": _bin(self.supply, SUPPLY_FIELDS, since, now, points),
             "tower": _bin(self.tower, TOWER_FIELDS, since, now, points),
             "top": _bin(self.top, TOP_FIELDS, since, now, points),
+            "dish": _bin(self.dish, DISH_FIELDS, since, now, points),
+            "env": _bin(self.env, ENV_FIELDS, since, now, points),
         }
 
     # ------------------------------------------------------------ CSV seeding
@@ -172,6 +185,14 @@ class History:
             added = 1
         elif at == "top":
             self._add(self.top, (t, num("v_avg"), num("v_min")))
+            added = 1
+        elev = num("elev_deg")
+        if elev is not None:
+            self._add(self.dish, (t, elev))
+            added = 1
+        air, rh = num("box_air_c"), num("box_rh")
+        if air is not None or rh is not None:
+            self._add(self.env, (t, air, rh))
             added = 1
         return added
 
@@ -336,6 +357,15 @@ class Dashboard:
         for q in list(self.sse):
             if q.qsize() < 100:
                 q.put_nowait(("alert", alert))
+
+    def push_elev(self, msg: dict | None) -> None:
+        """Every elevation reading goes out at once (5 a second while the dish moves),
+        so the page's dial can follow it; the 1-second state carries it too."""
+        if msg is None:
+            return
+        for q in list(self.sse):
+            if q.qsize() < 100:
+                q.put_nowait(("elev", msg))
 
     # ------------------------------------------------------------ HTTP
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -511,7 +541,9 @@ def build_state(svc, public: bool = False) -> dict:
                    "i_max_alert": cfg.i_max_alert, "i_min_alert": cfg.i_min_alert,
                    "temp_warn_c": cfg.temp_warn_c, "temp2_warn_c": cfg.temp2_warn_c,
                    "box_temp_warn_c": cfg.box_temp_warn_c, "stale_s": cfg.tlm_stale_s,
-                   "ptt_stuck_s": cfg.ptt_stuck_s},
+                   "ptt_stuck_s": cfg.ptt_stuck_s, "env_rh_warn": cfg.env_rh_warn,
+                   "env_dew_margin_c": cfg.env_dew_margin_c,
+                   "elev_min_deg": cfg.elev_min_deg, "elev_max_deg": cfg.elev_max_deg},
         "telemetry": svc.tlm is not None,
     }
     hub = svc.tlm
@@ -551,6 +583,19 @@ def build_state(svc, public: bool = False) -> dict:
     st["drop_v"] = (box.v_avg - top.v_avg
                     if box and top and box.ok and top.ok and not hub.box_stale
                     and now - hub.pwr_time <= cfg.tlm_stale_s else None)
+    d = hub.dish
+    m = hub.elev
+    st["dish"] = None if d is None else {
+        "ok": d["ok"], "age_s": round(now - d["time"], 1),
+        **({k: d[k] for k in ("deg", "raw_deg", "temp_c", "moving", "g")} if d["ok"] else {}),
+        "calibrated": m.calibrated, "cal_points": len(m.points), "cal_offset": m.offset,
+        "cal_gain": m.gain, "cal_resid": m.residual_deg(), "tc": m.tc,
+    }
+    e = hub.env
+    st["env"] = None if e is None else {
+        k: (round(now - v, 1) if k == "time" else v) for k, v in e.items()}
+    if st["env"] is not None:
+        st["env"]["age_s"] = st["env"].pop("time")
     st["xv"] = {k: {"text": v["text"], "age_s": round(now - v["time"])}
                 for k, v in hub.xv_replies.items()}
     st["extremes"] = hub.extremes.as_dict()

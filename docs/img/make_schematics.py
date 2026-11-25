@@ -636,9 +636,92 @@ def tlm_signals():
     d.save(f"{OUT}/remtlm-tower-signals-schematic.svg")
 
 
+# ------------------------------------------------------------------ tower sensors (dish elevation, box air)
+def tlm_sensors():
+    """ADXL355 on the dish frame and BME280 in the box, on I2C through the shifter's channels 3 and 4."""
+    d = schemdraw.Drawing(show=False)
+    SP = 2.4
+    nano = d.add(_box(
+        pins=[elm.IcPin(name="GND", side="right"), elm.IcPin(name="5V", side="right"),
+              elm.IcPin(name="A5 (SCL)", side="right", anchorname="A5"),
+              elm.IcPin(name="A4 (SDA)", side="right", anchorname="A4")],
+        pinspacing=SP, edgepadW=2.0, leadlen=0.6, label="tower\nNano", lblsize=13))
+    XS = nano.absanchors["A4"].x + 5.0
+    sh = d.add(_box(
+        pins=[elm.IcPin(name="HV4", side="left"), elm.IcPin(name="HV3", side="left"),
+              elm.IcPin(name="LV4", side="right"), elm.IcPin(name="LV3", side="right"),
+              elm.IcPin(name="HV", side="top", pos=0.3), elm.IcPin(name="LV", side="top", pos=0.7),
+              elm.IcPin(name="GND", side="bottom")],
+        pinspacing=SP, edgepadW=2.6, edgepadH=1.0, leadlen=0.6,
+        label="BSS138\nch 3, 4", lblsize=11).anchor("HV3").at((XS, nano.absanchors["A4"].y)))
+    _wire(d, nano.absanchors["A4"], sh.absanchors["HV3"])
+    _wire(d, nano.absanchors["A5"], sh.absanchors["HV4"])
+    _net(d, sh.absanchors["HV"], "+5V", "up", 0.5)
+    _net(d, sh.absanchors["LV"], "+3.3V", "up", 0.5)
+    d.add(elm.Ground().at(sh.absanchors["GND"]))
+    _net(d, nano.absanchors["5V"], "+5V", "right", 0.8)
+    d.add(elm.Line().at(nano.absanchors["GND"]).right().length(0.8))
+    d.add(elm.Ground())
+    d.add(elm.Label().at((sh.absanchors["HV3"].x - 2.2, sh.absanchors["HV3"].y + 0.35))
+          .label("SDA", fontsize=10, color=GRAY))
+    d.add(elm.Label().at((sh.absanchors["HV4"].x - 2.2, sh.absanchors["HV4"].y + 0.35))
+          .label("SCL", fontsize=10, color=GRAY))
+
+    # 3.3 V I2C bus out to the two headers
+    sda, scl = sh.absanchors["LV3"], sh.absanchors["LV4"]
+    XB = sda.x + 3.0
+    XB2 = XB + 13.0
+    _wire(d, sda, (XB2, sda.y))
+    _wire(d, scl, (XB2 + 0.8, scl.y))
+    for x in (XB, XB2):                       # junctions only where a drop leaves the bus
+        d.add(elm.Dot().at((x, sda.y)))
+        d.add(elm.Dot().at((x + 0.8, scl.y)))
+
+    def sensor(x, title, pins, straps):
+        # pins: list of (name, net) from the top; net in SDA/SCL/3V3/GND/strap
+        y0 = scl.y - 3.0
+        box = d.add(_box(pins=[elm.IcPin(name=n, side="left") for n, _ in reversed(pins)],
+                         pinspacing=1.4, edgepadW=7.0, edgepadH=0.6, leadlen=0.8,
+                         label=title, lblsize=11).anchor(pins[0][0]).at((x + 2.2, y0)))
+        for n, net in pins:
+            a = box.absanchors[n]
+            if net == "SDA":
+                _wire(d, (x, sda.y), (x, a.y), a)
+            elif net == "SCL":
+                _wire(d, (x + 0.8, scl.y), (x + 0.8, a.y), a)
+            elif net == "3V3":
+                _net(d, a, "+3.3V", "left", 1.2)
+            elif net == "GND":
+                d.add(elm.Line().at(a).left().length(1.2))
+                d.add(elm.Ground())
+        d.add(elm.Label().at((x + 3.2, box.get_bbox(transform=True).ymin - 0.9))
+              .label(straps, fontsize=9, color=GRAY, halign="left"))
+        return box
+
+    b1 = sensor(XB, "ADXL355\n(dish frame,\nJ2 ELEV)",
+           [("SDA (MOSI)", "SDA"), ("SCL (CS)", "SCL"), ("VSUPPLY, VDDIO", "3V3"), ("GND", "GND"),
+            ("ASEL (MISO)", "GND"), ("VSSIO (SCLK)", "GND")],
+           "ASEL to GND: 0x1D (3.3 V: 0x53)\nVSSIO to GND: I2C mode")
+    sensor(XB2, "BME280\n(box air,\nJ3 AIR)",
+           [("SDA", "SDA"), ("SCL", "SCL"), ("VCC", "3V3"), ("GND", "GND"),
+            ("SDO", "GND"), ("CSB", "3V3")],
+           "SDO to GND: 0x76 (3.3 V: 0x77)\nCSB high: I2C mode")
+
+    bb = nano.get_bbox(transform=True)
+    d.add(elm.Label().at((bb.xmin, b1.get_bbox(transform=True).ymin - 3.0)).label(
+        "One sensor for the frame that carries both dishes (10 and 24 GHz, one actuator). "
+        "The shifter module's own 10k pull-ups are the I2C pull-ups on both sides.\n"
+        "+3.3V: the AMS1117 module (about 1 mA for both sensors). "
+        "Leads to J2/J3 on RK-302 Rev B, or B2-B5 / C2-C5 on the Rev A sensor board: "
+        "SDA, SCL, 3V3, GND from the square pad.",
+        halign="left", **NOTE))
+    d.save(f"{OUT}/remtlm-tower-sensors-schematic.svg")
+
+
 client()
 station()
 tlm_e220()
 tlm_power()
 tlm_psu()
 tlm_signals()
+tlm_sensors()

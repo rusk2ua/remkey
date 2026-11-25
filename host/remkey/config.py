@@ -47,6 +47,16 @@ class StationConfig:
     v_max_alert: float = 14.3        # 0 = off
     i_max_alert: float = 0.0         # peak current above this; 0 = off until you know normal
     i_min_alert: float = 0.0         # average current below this (something lost power); 0 = off
+    # --- dish elevation (ADXL355) and box environment (BME280), tower firmware 0.7.0+ ---
+    elev_axis: str = "x"             # sensor axis along the dish's boresight: x, y, z, or -x etc.
+    elev_cal: list = field(default_factory=list)       # [[raw_deg, inclinometer_deg], ...]
+    elev_tc_deg_per_c: float = 0.0   # temperature coefficient (python -m remkey.elevfit)
+    elev_t_ref_c: float = 25.0       # sensor temperature the coefficient is referred to
+    elev_min_deg: float = -2.0       # dashboard dial range
+    elev_max_deg: float = 22.0
+    env_rh_warn: float = 85.0        # box relative humidity alert, %; 0 = off
+    env_dew_margin_c: float = 3.0    # alert when the box air is this close to its dew point; 0 = off
+    env_altitude_m: float = 0.0      # > 0: also show sea-level pressure
     # --- web dashboard (telemetry monitor in a browser); dash_port = 0 turns it off ---
     dash_port: int = 0
     dash_host: str = "0.0.0.0"
@@ -90,7 +100,13 @@ def _load(cls, path: str | Path):
 
 
 def load_station(path: str | Path) -> StationConfig:
-    return _load(StationConfig, path)
+    cfg = _load(StationConfig, path)
+    from .sensors import parse_axis
+    parse_axis(cfg.elev_axis)                     # raises ValueError with a readable message
+    for pt in cfg.elev_cal:
+        if not (isinstance(pt, list) and len(pt) == 2 and all(isinstance(v, (int, float)) for v in pt)):
+            raise ValueError(f"{path}: elev_cal entries are [raw_deg, inclinometer_deg] pairs, not {pt!r}")
+    return cfg
 
 
 def load_client(path: str | Path) -> ClientConfig:

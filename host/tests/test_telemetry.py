@@ -183,7 +183,8 @@ async def test_station_forwards_and_alerts(station_tlm):
     rows = (tmp / "tlm.csv").read_text().splitlines()
     assert rows[0].startswith("time,seq") and len(rows) == 3
     assert rows[0].endswith("temp1_c,temp2_c,uptime_s,supply_at,box_temp_c,top_v_avg,"
-                            "v_avg,v_min,v_max,i_avg,i_min,i_max,key_line,key_line_v")
+                            "v_avg,v_min,v_max,i_avg,i_min,i_max,key_line,key_line_v,"
+                            "elev_deg,elev_raw_deg,tilt_temp_c,box_air_c,box_rh,box_hpa")
     writer.close()
 
 
@@ -267,7 +268,8 @@ def test_csv_rotates_old_header(tmp_path):
     path = tmp_path / "tlm.csv"
     path.write_text("time,seq,pa_pk_mv\n1,2,3\n")
     CsvLog(str(path))
-    assert path.read_text().splitlines()[0].endswith("i_max,key_line,key_line_v")
+    assert path.read_text().splitlines()[0].endswith(
+        "key_line,key_line_v,elev_deg,elev_raw_deg,tilt_temp_c,box_air_c,box_rh,box_hpa")
     assert len(list(tmp_path.glob("tlm.*.csv"))) == 1
 
 
@@ -294,7 +296,7 @@ async def test_station_power_merge_alerts_and_fit(tmp_path):
         assert m["drop_v"] == pytest.approx(0.80) and m["ok"]
         tlink.inject(pkt(seq=1, pa=0))
         row = (tmp_path / "tlm.csv").read_text().splitlines()[1].split(",")
-        assert row[-8:-2] == ["13.300", "13.300", "13.300", "4.000", "4.000", "4.000"]
+        assert row[-14:-8] == ["13.300", "13.300", "13.300", "4.000", "4.000", "4.000"]
 
         # low voltage and high current alerts, then recovery
         assert "link up" in (await next_of("alert"))["msg"]   # from the first $RT
@@ -432,8 +434,9 @@ async def test_station_supply_box_only_then_with_top(tmp_path):
         # the tower is silent, so the box logs its own rows
         row = (tmp_path / "tlm.csv").read_text().splitlines()[1].split(",")
         assert row[1] == "1" and row[2] == "" and row[11:14] == ["base", "21.5", ""]
-        assert row[-8:-2] == ["14.050", "14.050", "14.050", "1.100", "1.100", "1.100"]
-        assert row[-2:] == ["", ""]                          # no tower row: no key-line columns
+        assert row[-14:-8] == ["14.050", "14.050", "14.050", "1.100", "1.100", "1.100"]
+        assert row[-8:-6] == ["", ""]                        # no tower row: no key-line columns
+        assert row[-6:] == [""] * 6                          # no dish / box sensors heard
 
         # alerts from the box: low voltage at the base, high current, hot box, INA226 gone
         tlink.inject(box(seq=2, v=13.2, vmin=12.8, i=5.0, imax=7.4, temp=47.0))
@@ -465,7 +468,7 @@ async def test_station_supply_box_only_then_with_top(tmp_path):
         await next_of("tlm", lambda m: m["seq"] == 51)
         last = (tmp_path / "tlm.csv").read_text().splitlines()[-1].split(",")
         assert last[1] == "51" and last[11:14] == ["base", "20.0", "13.200"]
-        assert last[-8:-5] == ["14.000", "14.000", "14.000"]
+        assert last[-14:-11] == ["14.000", "14.000", "14.000"]
         writer.close()
     finally:
         await svc.stop()

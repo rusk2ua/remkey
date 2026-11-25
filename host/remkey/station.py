@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import math
 import sys
 import time
 from collections import deque
@@ -20,18 +21,22 @@ from collections import deque
 from . import protocol as P
 from .config import StationConfig, load_station
 from .dashboard import Dashboard, Extremes, History
+from .sensors import Bme280Cal, Elevation, adxl_temp_c, dew_point_c, sea_level_hpa
 from .serial_link import BACK, LOST, FakeLink, KeyerLink, SerialLink
 from .telemetry import (
     SRC_BASE,
     CableFit,
     Calibration,
     CsvLog,
+    EnvCalPacket,
+    EnvPacket,
     LinkStats,
     Packet,
     PowerPacket,
     ReplyAssembler,
     ReplyPart,
     SignalStats,
+    TiltPacket,
     gauge_match,
     parse_any,
     parse_signal,
@@ -64,8 +69,9 @@ class TelemetryHub:
     """Turns remtlm packets from the base Nano into calibrated readings and alerts.
 
     Two senders share the LoRa channel: the tower-top box ($RT, $RK and, if it has
-    its own INA226, $RP) and the supply box at the tower base ($RS). Each has its
-    own link statistics and stale alert.
+    its own INA226, $RP; with its sensors, $RA dish elevation and $RB/$RC box
+    environment) and the supply box at the tower base ($RS). Each has its own link
+    statistics and stale alert.
     """
 
     def __init__(self, cfg: StationConfig, notify):
@@ -101,9 +107,17 @@ class TelemetryHub:
         self.key_since: float | None = None          # MKU key line keyed continuously since
         self.silent_since: float | None = None       # MKU transmitting with the PA silent since
         self.pwr_flags: dict[str, bool] = {}
+        # dish elevation (ADXL355) and box environment (BME280), tower 0.7.0+
+        self.elev = Elevation(cfg.elev_axis, cfg.elev_cal, cfg.elev_tc_deg_per_c, cfg.elev_t_ref_c)
+        self.dish: dict | None = None                # latest elevation reading
+        self.dish_moving = False
+        self.env_cal: Bme280Cal | None = None
+        self.env: dict | None = None                 # latest box air reading
+        self._dish_hist_t = 0.0
         # for the web dashboard
         self.alerts: deque[dict] = deque(maxlen=200)
         self.on_alert = None                          # callable(dict), set by the dashboard
+        self.on_elev = None                           # callable(dict): every elevation reading, at once
         self.extremes = Extremes()
         self.history = History(cfg.dash_history_h)
         self.history.pa_unit = "W" if self.pa_cal else "mV"
@@ -131,6 +145,15 @@ class TelemetryHub:
         if isinstance(p, PowerPacket):
             self._on_power(p)
             return
+        if isinstance(p, TiltPacket):
+            self._on_tilt(p)
+            return
+        if isinstance(p, EnvPacket):
+            self._on_env(p)
+            return
+        if isinstance(p, EnvCalPacket):
+            self._on_env_cal(p)
+            return
         if not isinstance(p, Packet):
             sig = parse_signal(line)
             if sig is not None:
@@ -154,7 +177,7 @@ class TelemetryHub:
         pa_avg_w = self.pa_cal.watts(p.pa_avg_mv)
         top = self.pwr if (self.pwr is not None and self.pwr.seq == p.seq) else None
         box = self.box if (self.box is not None and not self.box_stale) else None
-        self._csv(p, pa_pk_w, pa_avg_w, box or top, top if box else None)
+        self._csv(p, pa_pk_w, pa_avg_w, box or top, top if box else None, self._dish_csv())
         self.latest = {
             "t": "tlm",
             "seq": p.seq,
@@ -249,13 +272,99 @@ class TelemetryHub:
                        "PA output back" if tx else "MKU no longer transmitting")
 
     # ------------------------------------------------------------ supply monitor
-    def _csv(self, p, pa_pk_w, pa_avg_w, pwr, top) -> None:
+    def _csv(self, p, pa_pk_w, pa_avg_w, pwr, top, dish=None) -> None:
         if not self.csv:
             return
         try:
-            self.csv.write(p, pa_pk_w, pa_avg_w, pwr, top)
+            self.csv.write(p, pa_pk_w, pa_avg_w, pwr, top, dish)
         except OSError as exc:
             log.warning("telemetry CSV: %s", exc)
+
+    # ------------------------------------------------------------ dish elevation, box environment
+    def _on_tilt(self, p: TiltPacket) -> None:
+        now = time.time()
+        self._flag("dead:tilt", not p.ok, "dish elevation sensor (ADXL355) not answering",
+                   "dish elevation sensor answering again")
+        if not p.ok:
+            self.dish = {"ok": False, "time": now}
+            return
+        raw = self.elev.raw(p.x, p.y, p.z)
+        temp = adxl_temp_c(p.t_raw)
+        deg = self.elev.degrees(raw, temp)
+        self.dish = {"ok": True, "deg": deg, "raw_deg": raw, "temp_c": temp, "moving": p.moving,
+                     "g": math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z) / 256000.0, "time": now}
+        if p.moving != self.dish_moving:
+            self.dish_moving = p.moving
+            log.info("dish %s at %.2f deg", "moving" if p.moving else "still", deg)
+        self.extremes.add("elev", deg)
+        if not p.moving or now - self._dish_hist_t >= 1.0:   # live readings: 1 per second in the charts
+            self._dish_hist_t = now
+            self.history.add_dish(now, deg)
+        if self.on_elev:
+            self.on_elev(self.elev_message())
+
+    def elev_message(self) -> dict | None:
+        """The latest elevation, for the dashboard's live dial. One sensor on the frame that
+        carries both dishes (10 and 24 GHz), driven by one actuator: one reading."""
+        d = self.dish
+        if d is None or not d.get("ok"):
+            return None
+        return {"deg": d["deg"], "raw_deg": d["raw_deg"], "moving": d["moving"], "ts": d["time"]}
+
+    def _on_env_cal(self, p: EnvCalPacket) -> None:
+        try:
+            cal = Bme280Cal.from_bytes(p.chip, p.cal)
+        except ValueError:
+            return
+        if self.env_cal != cal:
+            log.info("telemetry: box environment sensor calibration received (%s)",
+                     "BME280" if p.chip == 96 else "BMP280, no humidity")
+        self.env_cal = cal
+
+    def _on_env(self, p: EnvPacket) -> None:
+        cfg = self.cfg
+        now = time.time()
+        self._flag("dead:env", not p.ok, "box environment sensor (BME280) not answering",
+                   "box environment sensor answering again")
+        if not p.ok:
+            self.env = {"ok": False, "time": now}
+            return
+        cal = self.env_cal
+        if cal is None or cal.chip != p.chip:
+            # the tower resends its calibration every 5 minutes
+            self.env = {"ok": True, "waiting": True, "chip": p.chip, "time": now}
+            return
+        temp, hpa, rh = cal.compensate(p.p_raw, p.t_raw, p.h_raw)
+        dew = dew_point_c(temp, rh) if rh is not None else None
+        margin = temp - dew if dew is not None else None
+        self.env = {"ok": True, "waiting": False, "chip": p.chip, "temp_c": temp, "hpa": hpa,
+                    "sea_hpa": sea_level_hpa(hpa, temp, cfg.env_altitude_m)
+                    if hpa is not None and cfg.env_altitude_m > 0 else None,
+                    "rh": rh, "dew_c": dew, "margin_c": margin, "time": now}
+        self.history.add_env(now, temp, rh)
+        self.extremes.add("box_air", temp)
+        self.extremes.add("box_rh", rh)
+        if rh is not None and cfg.env_rh_warn:
+            on = self.pwr_flags.get("env_rh", False)
+            self._flag("env_rh", rh >= (cfg.env_rh_warn - 5 if on else cfg.env_rh_warn),
+                       f"tower box humidity HIGH: {rh:.0f}% RH at {temp:.1f} C",
+                       f"tower box humidity back to {rh:.0f}% RH")
+        if margin is not None and cfg.env_dew_margin_c:
+            on = self.pwr_flags.get("env_dew", False)
+            self._flag("env_dew", margin <= (cfg.env_dew_margin_c + 1 if on else cfg.env_dew_margin_c),
+                       f"tower box near CONDENSATION: air {temp:.1f} C, dew point {dew:.1f} C",
+                       f"tower box clear of its dew point again ({margin:.1f} C margin)")
+
+    def _dish_csv(self) -> dict:
+        """Latest elevation and box air readings for the CSV row, if they're recent."""
+        now = time.time()
+        out: dict = {}
+        d, e = self.dish, self.env
+        if d and d.get("ok") and now - d["time"] <= 3 * self.cfg.tlm_stale_s:
+            out.update(elev_deg=d["deg"], elev_raw_deg=d["raw_deg"], tilt_temp_c=d["temp_c"])
+        if e and e.get("ok") and not e.get("waiting") and now - e["time"] <= 30.0 + self.cfg.tlm_stale_s:
+            out.update(box_air_c=e["temp_c"], box_rh=e["rh"], box_hpa=e["hpa"])
+        return out
 
     def _on_power(self, raw: PowerPacket) -> None:
         cfg = self.cfg
@@ -301,7 +410,7 @@ class TelemetryHub:
         self._flag("dead:base", not p.ok, "tower-base supply monitor (INA226) not answering",
                    "tower-base supply monitor answering again")
         if self.stale:                               # no tower rows to ride on: log on our own
-            self._csv(None, None, None, p, None)
+            self._csv(None, None, None, p, None, self._dish_csv())
         if not p.ok:
             return
         self._voltage_alerts(p, "supply at tower base", "base")
@@ -472,6 +581,7 @@ class StationService:
                 self.dashboard = dash
                 if self.tlm:
                     self.tlm.on_alert = dash.push_alert
+                    self.tlm.on_elev = dash.push_elev
         if self.cfg.cloud_bucket:
             from .cloud import CloudUploader
             self.cloud = CloudUploader(self)

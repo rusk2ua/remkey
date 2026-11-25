@@ -3,6 +3,44 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-25 (remtlm 0.7.0, host 0.11.0, RK-302 Rev B)
+
+### remtlm firmware
+- Dish elevation: an ADXL355 on the frame that carries both dishes (10 and 24 GHz, one
+  actuator, one sensor), on I2C. New `$RA` packet with the raw x/y/z average and the
+  sensor temperature, sent just before each `$RT`.
+- Live mode: while the dish moves (an axis changes by more than `LIVE_THRESHOLD` between
+  200 ms averages), a `$RA` every 200 ms until it has been still for 3 s. Live packets
+  skip the 450 ms after each `$RT` (the supply box's slot), and no MKU poll starts while
+  the dish moves.
+- Box air: a BME280 (or a BMP280, without humidity). `$RB` raw readings every 10 s, `$RC`
+  calibration constants after boot and every 5 minutes.
+- Both sensors are found at either I2C address, re-found if they drop out, and reported as
+  "not found" every 30 s when missing. `TILT_ENABLE` / `ENV_ENABLE` in `config.h`.
+- Tower image: 73% of flash, 62% of RAM (80% / 65% with the top-box INA226). Base and
+  supply-box behavior unchanged (both accept and forward the new packets).
+
+### Host
+- Elevation from the raw axes (independent of the plate's roll), with a one-time
+  calibration in `station.toml` (`elev_cal` inclinometer pairs, `elev_axis`) and a
+  temperature coefficient fitted by the new `python -m remkey.elevfit`.
+- BME280 compensation (Bosch reference formulas), dew point, optional sea-level
+  pressure; alerts for box humidity (`env_rh_warn`) and near-condensation
+  (`env_dew_margin_c`).
+- Dashboard: a panel-meter elevation dial that follows the dish at 5 readings a second
+  (new `elev` event on the live stream), box air readings, an elevation chart, box air in
+  the temperatures chart. Cloud summary and `tlmview` show both.
+- CSV log gains `elev_deg`, `elev_raw_deg`, `tilt_temp_c`, `box_air_c`, `box_rh`,
+  `box_hpa` (an older log file is set aside and a new one started).
+
+### Hardware
+- RK-302 Rev B (not yet ordered): the shifter's spare channels 3 and 4 carry I2C to A4/A5;
+  new 1x4 headers J2 "ELEV" (ADXL355 plate) and J3 "AIR" (BME280), pinned SDA, SCL,
+  3V3, GND.
+- `docs/prototype`: a sensor board for a RK-302 Rev A (ElectroCookie mini, the same BSS138
+  4-channel module, same lead pinout).
+- `docs/img/remtlm-tower-sensors-schematic.svg`.
+
 ## 2026-11-20 (tower checklist)
 
 ### Docs

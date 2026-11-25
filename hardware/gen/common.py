@@ -227,7 +227,7 @@ class Board:
         self.text("JLCJLCJLCJLC", x, y, 0.8)
 
     def nano(self, ref, x_usb, y_analog, nets):
-        """Arduino Nano in two 1x15 sockets, USB end pointing +x (towards x_usb).
+        """Arduino Nano in two 1x15 sockets, USB end pointing +x (toward x_usb).
 
         The analog row (D13, 3V3, AREF, A0-A7, 5V, RST, GND, VIN) sits at y_analog,
         the digital row (D12-D2, GND, RST, RX0, TX1) 15.24 mm further down."""

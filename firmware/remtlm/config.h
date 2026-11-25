@@ -118,6 +118,43 @@
 #define PWR_FAIL_LIMIT   5        // consecutive failed reads before it counts as not answering
 
 // ---------------------------------------------------------------------------
+// Dish elevation and box environment (TOWER). Both sensors are 3.3 V parts on I2C
+// (A4/A5), through the 3.3 V side of the level shifter: channels 3 and 4 of the
+// RK-302 Rev B's shifter and its sensor header, or the sensor board for a Rev A
+// (docs/prototype). The tower sends raw readings; the shack PC turns them into
+// degrees, temperature, humidity and pressure with the calibration in station.toml,
+// so recalibrating never needs a reflash.
+//   TILT_ENABLE  ADXL355 on the frame that carries both dishes (one actuator, one
+//                sensor; address 0x1D or 0x53, found automatically)
+//   ENV_ENABLE   BME280 in the box (0x76 or 0x77; a BMP280 works too, without humidity)
+// A missing sensor costs nothing but a short "not found" packet every 30 s.
+//
+// Live elevation: while the dish moves, a $RA goes out every LIVE_PERIOD_MS, until
+// it has been still for LIVE_HOLD_MS. "Moving" = an axis changed by more than
+// LIVE_THRESHOLD counts between two 200 ms averages (256000 counts = 1 g, so 350 is
+// about 0.08 deg). Raise it if wind sway keeps triggering live mode. Live packets
+// skip LIVE_GUARD_MS after each $RT, which keeps the supply box's slot clear, and
+// no MKU poll starts while the dish moves.
+// ---------------------------------------------------------------------------
+#ifndef TILT_ENABLE
+#define TILT_ENABLE       1
+#endif
+#ifndef ENV_ENABLE
+#define ENV_ENABLE        1
+#endif
+#define TILT_ODR_LPF      0x07     // ADXL355 filter: 31.25 Hz output, 7.8 Hz low-pass
+#define TILT_SAMPLE_MS    32UL     // one read per output sample
+#define LIVE_PERIOD_MS    200UL    // live elevation packet rate while the dish moves
+#define LIVE_HOLD_MS      3000UL   // keep sending this long after the last movement
+#define LIVE_THRESHOLD    350L     // counts between 200 ms averages that mean "moving"
+#define LIVE_GUARD_MS     450UL    // no live packet this long after a $RT (supply box slot)
+#define ENV_PERIOD_MS     10000UL  // BME280 reading
+#define ENV_CAL_PERIOD_MS 300000UL // resend the BME280 calibration constants
+#define SENSOR_RETRY_MS   5000UL   // look for a missing sensor this often
+#define SENSOR_FAIL_LIMIT 5        // consecutive failed reads before a sensor counts as gone
+#define SENSOR_MISSING_MS 30000UL  // report a missing sensor (ok 0) this often
+
+// ---------------------------------------------------------------------------
 // Reporting (TOWER)
 // ---------------------------------------------------------------------------
 #define SAMPLE_MS        5UL     // analog sampling: catches the peak of a 20 WPM dit

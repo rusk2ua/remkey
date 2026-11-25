@@ -19,6 +19,7 @@
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
+  --series-4: #a46ad8;
   --band-1: rgba(57, 135, 229, 0.32);
   --good: #0ca30c;
   --warning: #fab219;
@@ -41,6 +42,7 @@
     --series-1: #2a78d6;
     --series-2: #eb6834;
     --series-3: #1baf7a;
+    --series-4: #8a4fc4;
     --band-1: rgba(42, 120, 214, 0.14);
     --unlock: rgba(208, 59, 59, 0.14);
   }
@@ -126,6 +128,24 @@ ol#alerts time { color: var(--text-muted); font-variant-numeric: tabular-nums; f
 .ic { font-weight: 700; text-align: center; }
 .ic.warn { color: var(--critical); } .ic.ok { color: var(--good); } .ic.info { color: var(--series-1); }
 .note { color: var(--text-muted); font-size: 12px; margin-top: 8px; }
+.gauge { position: relative; max-width: 360px; margin: -4px auto 6px; }
+.gauge svg { display: block; width: 100%; height: auto; overflow: visible; }
+.gauge .tick { stroke: var(--text-muted); stroke-width: 1; }
+.gauge .tick.major { stroke: var(--text-secondary); stroke-width: 2; }
+.gauge .lab { fill: var(--text-muted); font: 11px var(--font); text-anchor: middle; dominant-baseline: middle; font-variant-numeric: tabular-nums; }
+.gauge .arc { fill: none; stroke: var(--border); stroke-width: 2; }
+.gauge .zero { stroke: var(--series-1); stroke-width: 2; }
+.gauge .needle { stroke: var(--critical); stroke-width: 2.5; stroke-linecap: round; }
+.gauge .hub { fill: var(--text-primary); }
+.gauge .read { text-align: center; margin-top: 2px; line-height: 1.1; }
+.gauge .read .big { font-size: 34px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.gauge .read .unit { font-size: 18px; color: var(--text-secondary); }
+.gauge.off .needle { stroke: var(--text-muted); }
+.moving { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; font-size: 12px; color: var(--warning); font-weight: 600; vertical-align: middle; visibility: hidden; }
+.moving::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1s ease-in-out infinite; }
+.moving.on { visibility: visible; }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .moving::before { animation: none; } }
 @media (max-width: 520px) {
   .charts { grid-template-columns: 1fr; }
   input[type=text] { width: 150px; }
@@ -154,6 +174,14 @@ ol#alerts time { color: var(--text-muted); font-variant-numeric: tabular-nums; f
       <h2>Tower top · PA &amp; transverter <span class="sub" id="tower-sub"></span></h2>
       <div id="tower-body"><div class="empty">Waiting for the tower-top box…</div></div>
     </article>
+    <article class="card" id="card-dish">
+      <h2>Dish elevation (10/24 GHz frame) · box air <span class="sub" id="dish-sub"></span></h2>
+      <div class="gauge off" id="dish-gauge">
+        <svg viewBox="0 0 320 152" role="img" aria-label="Dish elevation dial"></svg>
+        <div class="read"><span class="big" id="dish-deg">—</span><span class="unit">°</span><span class="moving" id="dish-moving">moving</span></div>
+      </div>
+      <div id="dish-body"><div class="empty">No elevation sensor heard yet (tower firmware 0.7.0 or later, with an ADXL355).</div></div>
+    </article>
     <article class="card" id="card-xv">
       <h2>Transverter status <span class="sub" id="xv-sub"></span></h2>
       <div id="xv-body"><div class="empty">No status reply from the MKU yet. The tower box asks every minute.</div></div>
@@ -175,6 +203,7 @@ ol#alerts time { color: var(--text-muted); font-variant-numeric: tabular-nums; f
       <div class="chart" id="ch-volt"><h3>Supply voltage</h3><div class="legend"></div><div class="cv"><canvas></canvas><div class="none">No data in this range yet</div></div></div>
       <div class="chart" id="ch-amp"><h3>Tower current</h3><div class="legend"></div><div class="cv"><canvas></canvas><div class="none">No data in this range yet</div></div></div>
       <div class="chart" id="ch-temp"><h3>Temperatures</h3><div class="legend"></div><div class="cv"><canvas></canvas><div class="none">No data in this range yet</div></div></div>
+      <div class="chart" id="ch-elev"><h3>Dish elevation</h3><div class="legend"></div><div class="cv"><canvas></canvas><div class="none">No data in this range yet</div></div></div>
       <div class="chart" id="ch-pa"><h3>PA output</h3><div class="legend"></div><div class="cv"><canvas></canvas><div class="none">No data in this range yet</div></div></div>
     </div>
   </section>
@@ -360,6 +389,9 @@ function render() {
     setPill("#pill-tower", "", "not built / not heard");
   }
 
+  // --- dish elevation and tower box air
+  renderDish(L);
+
   // --- transverter replies
   const xv = S.xv || {};
   if (xv.s || xv.v) {
@@ -379,6 +411,100 @@ function render() {
   renderAlerts();
 }
 
+// ---------------------------------------------------------------- elevation dial
+// A panel-meter dial: the scale spans elev_min..elev_max over a 140 degree arc. The
+// needle eases toward each new reading (5 a second while the dish moves), so it
+// sweeps like an analog meter instead of jumping.
+const DIAL = { min: null, max: null, cur: null, target: null, raf: 0, last: 0, needle: null };
+const DCX = 160, DCY = 146, DR = 138, SWEEP = 140;
+function dialAngle(v) {
+  const f = Math.max(-0.03, Math.min(1.03, (v - DIAL.min) / (DIAL.max - DIAL.min)));
+  return (90 + SWEEP / 2 - f * SWEEP) * Math.PI / 180;
+}
+function dialPt(v, r) { const a = dialAngle(v); return [DCX + r * Math.cos(a), DCY - r * Math.sin(a)]; }
+function dialBuild(min, max) {
+  if (DIAL.min === min && DIAL.max === max && DIAL.needle) return;
+  DIAL.min = min; DIAL.max = max;
+  const svg = $("#dish-gauge svg"), NS = "http://www.w3.org/2000/svg";
+  const mk = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
+  const kids = [];
+  const [ax, ay] = dialPt(min, DR), [bx, by] = dialPt(max, DR);
+  kids.push(mk("path", { class: "arc", d: `M${ax},${ay} A${DR},${DR} 0 0 1 ${bx},${by}` }));
+  const span = max - min, minor = span > 40 ? 2 : 1, major = span > 40 ? 10 : 5;
+  for (let v = Math.ceil(min / minor) * minor; v <= max + 1e-9; v += minor) {
+    const big = Math.abs(v / major - Math.round(v / major)) < 1e-6;
+    const [x1, y1] = dialPt(v, DR), [x2, y2] = dialPt(v, DR - (big ? 14 : 7));
+    kids.push(mk("line", { class: "tick" + (big ? " major" : ""), x1, y1, x2, y2 }));
+    if (big) { const [lx, ly] = dialPt(v, DR - 26); const t = mk("text", { class: "lab", x: lx, y: ly }); t.textContent = String(Math.round(v)); kids.push(t); }
+  }
+  if (min < 0 && max > 0) { const [x1, y1] = dialPt(0, DR + 4), [x2, y2] = dialPt(0, DR - 16); kids.push(mk("line", { class: "zero", x1, y1, x2, y2 })); }
+  DIAL.needle = mk("line", { class: "needle", x1: DCX, y1: DCY, x2: DCX, y2: DCY - DR + 8 });
+  kids.push(DIAL.needle, mk("circle", { class: "hub", cx: DCX, cy: DCY, r: 5 }));
+  svg.replaceChildren(...kids);
+  if (DIAL.cur !== null) dialDraw(DIAL.cur);
+}
+function dialDraw(v) {
+  if (!DIAL.needle) return;
+  const [x, y] = dialPt(v, DR - 8);
+  DIAL.needle.setAttribute("x2", x); DIAL.needle.setAttribute("y2", y);
+}
+function dialStep(ts) {
+  const dt = DIAL.last ? Math.min(0.1, (ts - DIAL.last) / 1000) : 0.016;
+  DIAL.last = ts;
+  DIAL.cur += (DIAL.target - DIAL.cur) * (1 - Math.exp(-dt / 0.09));   // ~90 ms time constant
+  dialDraw(DIAL.cur);
+  if (Math.abs(DIAL.target - DIAL.cur) > 0.002) DIAL.raf = requestAnimationFrame(dialStep);
+  else { DIAL.cur = DIAL.target; dialDraw(DIAL.cur); DIAL.raf = 0; DIAL.last = 0; }
+}
+function dialSet(v) {
+  DIAL.target = v;
+  if (DIAL.cur === null || matchMedia("(prefers-reduced-motion: reduce)").matches) { DIAL.cur = v; dialDraw(v); return; }
+  if (!DIAL.raf) DIAL.raf = requestAnimationFrame(dialStep);
+}
+function dishLive(m) {             // one elevation reading, from the "elev" event or the state
+  if (!m || m.deg === null || m.deg === undefined) return;
+  dialSet(m.deg);
+  $("#dish-deg").textContent = num(m.deg, 2);
+  $("#dish-moving").classList.toggle("on", !!m.moving);
+  $("#dish-gauge").classList.remove("off");
+}
+function renderDish(L) {
+  dialBuild(L.elev_min_deg ?? -2, L.elev_max_deg ?? 22);
+  const d = S.dish, e = S.env;
+  if (!d && !e) return;
+  const rows = [];
+  if (d && d.ok) {
+    dishLive(d);
+    $("#dish-sub").textContent = `last reading ${ago(d.age_s + lag)}`;
+    rows.push(["Raw angle", `${num(d.raw_deg, 3)}° · sensor ${num(d.temp_c, 1)} °C · ${num(d.g, 3)} g`]);
+    rows.push(["Calibration", !d.calibrated ? st("warn", "none yet: raw angle shown (see README, Dish elevation)")
+      : `${d.cal_points} point${d.cal_points === 1 ? "" : "s"}` + (d.cal_resid !== null ? ` · fit within ${num(d.cal_resid, 3)}°` : "")
+        + (d.tc ? ` · ${num(d.tc, 4)}°/°C` : " · no temperature fit yet")]);
+    const X = S.extremes || {};
+    if (X.elev) rows.push(["Since reset", `${num(X.elev[0], 2)}° – ${num(X.elev[1], 2)}°`]);
+  } else if (d) {
+    $("#dish-gauge").classList.add("off");
+    $("#dish-moving").classList.remove("on");
+    rows.push(["Elevation sensor", st("bad", "ADXL355 not answering")]);
+  }
+  if (e) {
+    if (!e.ok) rows.push(["Box air", st("bad", "BME280 not answering")]);
+    else if (e.waiting) rows.push(["Box air", st("off", "waiting for the sensor's calibration (sent every 5 min)")]);
+    else {
+      const wet = L.env_rh_warn && e.rh !== null && e.rh >= L.env_rh_warn;
+      const dewy = L.env_dew_margin_c && e.margin_c !== null && e.margin_c <= L.env_dew_margin_c;
+      rows.push(["Box air", `${num(e.temp_c, 1)} °C`]);
+      if (e.rh !== null) {
+        rows.push(["Humidity", valSpan(`${num(e.rh, 0)}% RH`, false, wet)]);
+        rows.push(["Dew point", valSpan(`${num(e.dew_c, 1)} °C · ${num(e.margin_c, 1)} °C margin`, dewy, false)]);
+      } else rows.push(["Humidity", st("off", "BMP280: no humidity sensor")]);
+      rows.push(["Pressure", `${num(e.hpa, 1)} hPa` + (e.sea_hpa !== null ? ` · ${num(e.sea_hpa, 1)} hPa sea level` : "")]);
+    }
+    if (!d || !d.ok) $("#dish-sub").textContent = e.age_s !== undefined ? `box air ${ago(e.age_s + lag)}` : "";
+  }
+  $("#dish-body").replaceChildren(dl(rows));
+}
+
 function renderAlerts() {
   const list = $("#alerts");
   const a = (S && S.alerts) || [];
@@ -396,6 +522,7 @@ const charts = {};
 function chartDefs() {
   if (!H) return {};
   const sup = H.supply, tow = H.tower, top = H.top, L = (S && S.limits) || {};
+  const dish = H.dish || { t: [], elev: [] }, env = H.env || { t: [], air: [], rh: [] };
   const names = (S && S.tower && S.tower.temp_names) || ["PA heatsink", "transverter case"];
   const boxName = (S && S.supply && S.supply.temp_name) || "supply box";
   const thr = (v, label) => v ? [{ y: v, label }] : [];
@@ -423,7 +550,13 @@ function chartDefs() {
         { name: boxName, color: "--series-1", t: sup.t, y: sup.temp },
         { name: names[0], color: "--series-2", t: tow.t, y: tow.t1 },
         { name: names[1], color: "--series-3", t: tow.t, y: tow.t2 },
+        ...(env.t.length ? [{ name: "tower box air", color: "--series-4", t: env.t, y: env.air }] : []),
       ],
+      thresholds: [],
+    },
+    "ch-elev": {
+      unit: "°", d: 2,
+      series: [{ name: "dish elevation", color: "--series-1", t: dish.t, y: dish.elev }],
       thresholds: [],
     },
     "ch-pa": {
@@ -589,7 +722,7 @@ function hover(ev, id) {
   tip.style.left = left + "px"; tip.style.top = top + "px";
 }
 function leave(id) { $("#tip").style.display = "none"; if (charts[id]) drawChart(id, charts[id].def); }
-for (const id of ["ch-volt", "ch-amp", "ch-temp", "ch-pa"]) {
+for (const id of ["ch-volt", "ch-amp", "ch-temp", "ch-elev", "ch-pa"]) {
   const c = $(`#${id} canvas`);
   c.addEventListener("pointermove", e => hover(e, id));
   c.addEventListener("pointerdown", e => hover(e, id));
@@ -606,7 +739,8 @@ function trimHistory(h, minutes) {
     for (const [k, v] of Object.entries(part)) out[k] = i < 0 ? [] : v.slice(i);
     return out;
   };
-  return { ...h, since, supply: cut(h.supply), tower: cut(h.tower), top: cut(h.top) };
+  return { ...h, since, supply: cut(h.supply), tower: cut(h.tower), top: cut(h.top),
+           dish: cut(h.dish || { t: [], elev: [] }), env: cut(h.env || { t: [], air: [], rh: [] }) };
 }
 async function loadHistory() {
   if (CLOUD) {
@@ -642,6 +776,11 @@ function connect() {
     if (first) for (const a of S.alerts || []) seenAlerts.add(a.ts + a.msg);
     render();
     if (first) loadHistory();
+  });
+  es.addEventListener("elev", e => {           // every reading, at once: the dial follows the dish
+    const m = JSON.parse(e.data);
+    if (S && S.dish) Object.assign(S.dish, { ok: true, deg: m.deg, raw_deg: m.raw_deg, moving: m.moving });
+    dishLive(m);
   });
   es.addEventListener("alert", e => {
     const a = JSON.parse(e.data);

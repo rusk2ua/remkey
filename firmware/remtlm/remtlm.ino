@@ -14,6 +14,10 @@
 //     immediately when lock changes
 //   - polls the MKU's serial port: "v" once after boot, then "s" every minute, and
 //     relays each reply verbatim as $RK packets. It never sends configuration commands.
+//   - optional (TILT_ENABLE, 0.7.0+): an ADXL355 on the dish for elevation, sent raw as
+//     $RA just before each $RT, and every 200 ms while the dish moves (live mode)
+//   - optional (ENV_ENABLE, 0.7.0+): a BME280 in the box, sent raw as $RB every 10 s,
+//     with its calibration constants ($RC) after boot and every 5 min
 //
 // PSU role (Nano in the supply box at the tower base):
 //   - reads an INA226 every 10 ms: supply output voltage and current into the tower
@@ -45,16 +49,19 @@
 #define HAS_SENSORS (REMTLM_ROLE == ROLE_TOWER || REMTLM_ROLE == ROLE_PSU)
 #define HAS_INA226  ((REMTLM_ROLE == ROLE_TOWER && PWR_ENABLE) || REMTLM_ROLE == ROLE_PSU)
 #define TEMP_PROBES (REMTLM_ROLE == ROLE_PSU ? 1 : 2)
+#define HAS_TILT    (REMTLM_ROLE == ROLE_TOWER && TILT_ENABLE)
+#define HAS_ENV     (REMTLM_ROLE == ROLE_TOWER && ENV_ENABLE)
+#define HAS_WIRE    (HAS_INA226 || HAS_TILT || HAS_ENV)
 
 #if HAS_SENSORS
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #endif
-#if HAS_INA226
+#if HAS_WIRE
 #include <Wire.h>
 #endif
 
-#define FW_VERSION "0.6.1"
+#define FW_VERSION "0.7.0"
 
 SoftwareSerial loraSerial(PIN_E220_TXD, PIN_E220_RXD);   // (rx, tx) from the Nano's side
 LoRa_E220 e220(&loraSerial, PIN_E220_AUX, PIN_E220_M0, PIN_E220_M1);
@@ -184,6 +191,39 @@ static void serviceTemp(uint32_t now) {
 
 #endif
 
+#if HAS_WIRE
+// ===========================================================================
+// I2C, shared by the INA226, the ADXL355 and the BME280
+// ===========================================================================
+static void i2cBegin() {
+  static bool started = false;
+  if (started) return;
+  started = true;
+  Wire.begin();
+  Wire.setClock(100000);
+  Wire.setWireTimeout(3000, true);   // never hang on a bad I2C bus
+}
+#endif
+
+#if HAS_TILT || HAS_ENV
+// Byte registers with an auto-incrementing address (ADXL355, BME280).
+static bool regWrite(uint8_t addr, uint8_t reg, uint8_t v) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  Wire.write(v);
+  return Wire.endTransmission() == 0;
+}
+
+static bool regRead(uint8_t addr, uint8_t reg, uint8_t *buf, uint8_t n) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;     // repeated start
+  if (Wire.requestFrom(addr, n) != n) return false;
+  for (uint8_t i = 0; i < n; i++) buf[i] = (uint8_t)Wire.read();
+  return true;
+}
+#endif
+
 #if HAS_INA226
 // ===========================================================================
 // INA226 supply monitor (TOWER with PWR_ENABLE, and PSU)
@@ -287,9 +327,7 @@ static PwrStats pwrTake() {
 }
 
 static void pwrSetup() {
-  Wire.begin();
-  Wire.setClock(100000);
-  Wire.setWireTimeout(3000, true);   // never hang on a bad I2C bus
+  i2cBegin();
   pwrUp = inaInit();
   Serial.println(pwrUp ? F("I:INA226 ok") : F("I:INA226 not found"));
   pwrRetry = millis() + PWR_RETRY_MS;
@@ -442,6 +480,242 @@ static bool refLocked() {
   return LOCK_ACTIVE_HIGH ? hi : !hi;
 }
 
+#if HAS_TILT
+// --- Dish elevation: ADXL355 ---------------------------------------------------
+// Every TILT_SAMPLE_MS one x/y/z sample goes into two sums: the 200 ms tick (live
+// mode and movement detection) and the report interval (the $RA before each $RT).
+static uint8_t tiltAddr = 0;                 // 0 = not found
+static uint8_t tiltFails = 0;
+static uint32_t tiltNext = 0, tiltRetry = 0, tiltMissingAt = 0;
+static int32_t tkSum[3], rpSum[3], tkLast[3];
+static uint8_t tkN = 0;
+static uint16_t rpN = 0;
+static bool tkHave = false;
+static uint16_t tiltTemp = 0;
+static uint8_t raSeq = 0;
+static uint32_t tickNext = 0, liveUntil = 0, guardUntil = 0;
+
+static bool tiltLive(uint32_t now) { return (int32_t)(liveUntil - now) > 0; }
+
+static bool tiltInit() {
+  static const uint8_t addrs[2] = {0x1D, 0x53};   // ASEL low, high
+  for (uint8_t i = 0; i < 2; i++) {
+    uint8_t a = addrs[i], id[3];
+    if (!regRead(a, 0x00, id, 3) || id[0] != 0xAD || id[1] != 0x1D || id[2] != 0xED) continue;
+    // standby, +-2 g with I2C fast mode, output rate / low-pass, then measure
+    if (regWrite(a, 0x2D, 0x01) && regWrite(a, 0x2C, 0x01) && regWrite(a, 0x28, TILT_ODR_LPF) &&
+        regWrite(a, 0x2D, 0x00)) {
+      tiltAddr = a;
+      tiltFails = 0;
+      tkHave = false;
+      tkN = 0;
+      rpN = 0;
+      for (uint8_t k = 0; k < 3; k++) tkSum[k] = rpSum[k] = 0;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void serviceTilt(uint32_t now) {
+  if (!tiltAddr) {
+    if ((int32_t)(now - tiltRetry) >= 0) {
+      tiltRetry = now + SENSOR_RETRY_MS;
+      if (tiltInit()) Serial.println(F("I:ADXL355 ok"));
+    }
+    return;
+  }
+  if ((int32_t)(now - tiltNext) < 0) return;
+  tiltNext = now + TILT_SAMPLE_MS;
+  uint8_t b[11];                             // TEMP2, TEMP1, then X, Y, Z (3 bytes each)
+  if (!regRead(tiltAddr, 0x06, b, 11)) {
+    if (++tiltFails >= SENSOR_FAIL_LIMIT) {  // one failure is a byte arriving mid-read
+      tiltAddr = 0;
+      tiltRetry = now + SENSOR_RETRY_MS;
+      Serial.println(F("I:ADXL355 not answering"));
+    }
+    return;
+  }
+  tiltFails = 0;
+  tiltTemp = (uint16_t)(((uint16_t)(b[0] & 0x0F) << 8) | b[1]);
+  for (uint8_t k = 0; k < 3; k++) {
+    const uint8_t *p = b + 2 + 3 * k;        // 20 bits, left-justified, two's complement
+    uint32_t v = ((uint32_t)p[0] << 12) | ((uint32_t)p[1] << 4) | (p[2] >> 4);
+    if (v & 0x80000UL) v |= 0xFFF00000UL;
+    tkSum[k] += (int32_t)v;
+    rpSum[k] += (int32_t)v;
+  }
+  tkN++;
+  rpN++;
+}
+
+static void sendTilt(const int32_t *v, uint8_t ok, uint8_t moving) {
+  char buf[TLM_MAX_LINE];
+  TiltData d;
+  d.seq = raSeq++;
+  d.x = v[0];
+  d.y = v[1];
+  d.z = v[2];
+  d.tRaw = ok ? tiltTemp : 0;
+  d.ok = ok;
+  d.moving = moving;
+  d.call = CALLSIGN;
+  int n = tlmFormatTilt(buf, sizeof(buf), &d);
+  if (n > 0) loraSend(buf, n);
+}
+
+// Every LIVE_PERIOD_MS: close the 200 ms average, look for movement, and in live
+// mode send it, unless the supply box's slot after the last $RT is still open.
+static void tiltTick(uint32_t now) {
+  if ((int32_t)(now - tickNext) < 0) return;
+  tickNext = now + LIVE_PERIOD_MS;
+  if (!tiltAddr || tkN == 0) return;
+  int32_t avg[3];
+  bool moved = false;
+  for (uint8_t k = 0; k < 3; k++) {
+    avg[k] = tkSum[k] / (int32_t)tkN;
+    tkSum[k] = 0;
+    int32_t dlt = avg[k] - tkLast[k];
+    if (tkHave && (dlt > LIVE_THRESHOLD || dlt < -LIVE_THRESHOLD)) moved = true;
+    tkLast[k] = avg[k];
+  }
+  tkN = 0;
+  tkHave = true;
+  if (moved) liveUntil = now + LIVE_HOLD_MS;
+  if (tiltLive(now) && (int32_t)(now - guardUntil) >= 0) sendTilt(avg, 1, 1);
+}
+
+// The $RA that goes just before each $RT: the interval's average (or, in live mode,
+// the latest 200 ms average), or "not found" every SENSOR_MISSING_MS.
+static void reportTilt(uint32_t now) {
+  if (tiltAddr && rpN > 0) {
+    int32_t avg[3];
+    bool live = tiltLive(now) && tkHave;
+    for (uint8_t k = 0; k < 3; k++) avg[k] = live ? tkLast[k] : rpSum[k] / (int32_t)rpN;
+    sendTilt(avg, 1, live ? 1 : 0);
+  } else if (!tiltAddr && (tiltMissingAt == 0 || now - tiltMissingAt >= SENSOR_MISSING_MS)) {
+    static const int32_t zero[3] = {0, 0, 0};
+    tiltMissingAt = now ? now : 1;
+    sendTilt(zero, 0, 0);
+  }
+  for (uint8_t k = 0; k < 3; k++) rpSum[k] = 0;
+  rpN = 0;
+}
+#else
+static bool tiltLive(uint32_t) { return false; }
+#endif
+
+#if HAS_ENV
+// --- Box environment: BME280 (or BMP280) -----------------------------------------
+// A forced-mode measurement every ENV_PERIOD_MS (x1 oversampling, ~10 ms), read
+// 50 ms later. Raw values go out as $RB; the calibration constants as $RC.
+static uint8_t envAddr = 0, envChip = 0, envFails = 0, rbSeq = 0;
+static uint8_t envCal[TLM_CAL_BYTES];
+static bool envBusy = false, envNew = false, envCalDue = false;
+static uint32_t envNext = 0, envRetry = 0, envT0 = 0, envCalAt = 0, envMissingAt = 0;
+static uint32_t envP = 0, envT = 0;
+static uint16_t envH = 0;
+
+static bool envInit() {
+  static const uint8_t addrs[2] = {0x76, 0x77};   // SDO low, high
+  for (uint8_t i = 0; i < 2; i++) {
+    uint8_t a = addrs[i], id = 0;
+    if (!regRead(a, 0xD0, &id, 1) || (id != 0x60 && id != 0x58)) continue;
+    if (!regRead(a, 0x88, envCal, 26)) continue;
+    if (id == 0x60) {
+      if (!regRead(a, 0xE1, envCal + 26, 7)) continue;
+    } else {
+      memset(envCal + 26, 0, 7);
+    }
+    if (!regWrite(a, 0xF5, 0x00)) continue;      // no IIR filter, no standby timing
+    envAddr = a;
+    envChip = id;
+    envFails = 0;
+    envBusy = false;
+    envCalDue = true;
+    return true;
+  }
+  return false;
+}
+
+static void envFail(uint32_t now) {
+  envBusy = false;
+  if (++envFails >= SENSOR_FAIL_LIMIT) {
+    envAddr = 0;
+    envRetry = now + SENSOR_RETRY_MS;
+    Serial.println(F("I:BME280 not answering"));
+  }
+}
+
+static void serviceEnv(uint32_t now) {
+  if (!envAddr) {
+    if ((int32_t)(now - envRetry) >= 0) {
+      envRetry = now + SENSOR_RETRY_MS;
+      if (envInit()) Serial.println(envChip == 0x60 ? F("I:BME280 ok") : F("I:BMP280 ok (no humidity)"));
+    }
+    return;
+  }
+  if (!envBusy) {
+    if ((int32_t)(now - envNext) < 0) return;
+    envNext = now + ENV_PERIOD_MS;
+    // humidity oversampling first (it takes effect at the ctrl_meas write), then
+    // temperature x1, pressure x1, forced mode
+    if ((envChip == 0x60 && !regWrite(envAddr, 0xF2, 0x01)) || !regWrite(envAddr, 0xF4, 0x25)) {
+      envFail(now);
+      return;
+    }
+    envBusy = true;
+    envT0 = now;
+    return;
+  }
+  if (now - envT0 < 50) return;
+  envBusy = false;
+  uint8_t b[8];
+  uint8_t n = envChip == 0x60 ? 8 : 6;
+  if (!regRead(envAddr, 0xF7, b, n)) {
+    envFail(now);
+    return;
+  }
+  envFails = 0;
+  envP = ((uint32_t)b[0] << 12) | ((uint32_t)b[1] << 4) | (b[2] >> 4);
+  envT = ((uint32_t)b[3] << 12) | ((uint32_t)b[4] << 4) | (b[5] >> 4);
+  envH = envChip == 0x60 ? (uint16_t)(((uint16_t)b[6] << 8) | b[7]) : 0;
+  envNew = true;
+}
+
+// Just before a $RT: the calibration when due, a new reading, or "not found".
+static void reportEnv(uint32_t now) {
+  char buf[TLM_MAX_LINE];
+  if (envAddr && (envCalDue || now - envCalAt >= ENV_CAL_PERIOD_MS)) {
+    int n = tlmFormatEnvCal(buf, sizeof(buf), envChip, envCal, CALLSIGN);
+    if (n > 0) loraSend(buf, n);
+    envCalDue = false;
+    envCalAt = now;
+  }
+  EnvData d;
+  d.call = CALLSIGN;
+  if (envAddr && envNew) {
+    envNew = false;
+    d.pRaw = envP;
+    d.tRaw = envT;
+    d.hRaw = envH;
+    d.chip = envChip;
+    d.ok = 1;
+  } else if (!envAddr && (envMissingAt == 0 || now - envMissingAt >= SENSOR_MISSING_MS)) {
+    envMissingAt = now ? now : 1;
+    d.pRaw = d.tRaw = 0;
+    d.hRaw = 0;
+    d.chip = 0;
+    d.ok = 0;
+  } else {
+    return;
+  }
+  d.seq = rbSeq++;
+  int n = tlmFormatEnv(buf, sizeof(buf), &d);
+  if (n > 0) loraSend(buf, n);
+}
+#endif
+
 #if PWR_ENABLE
 static void sendPower(uint16_t seqForPacket) {
   char buf[TLM_MAX_LINE];
@@ -461,7 +735,15 @@ static void sendPower(uint16_t seqForPacket) {
 }
 #endif
 
-static void sendReport() {
+// Everything a report interval produces goes out together, ending with the $RT:
+// the supply box's slot follows the $RT, so nothing else may land in it.
+static void sendReport(uint32_t now) {
+#if HAS_ENV
+  reportEnv(now);
+#endif
+#if HAS_TILT
+  reportTilt(now);
+#endif
 #if PWR_ENABLE
   sendPower(seq);          // same seq as the $RT that follows
 #endif
@@ -485,6 +767,11 @@ static void sendReport() {
   nSamples = 0;
   lockAll = refLocked();
   pttAny = lastPtt;                // still keyed carries into the next interval
+#if HAS_TILT
+  guardUntil = millis() + LIVE_GUARD_MS;
+#else
+  (void)now;
+#endif
 }
 
 #if XV_SERIAL_ENABLE
@@ -527,7 +814,8 @@ static void xvSendReply() {
 
 static void serviceXv(uint32_t now) {
   if (!xvWaiting) {
-    if ((int32_t)(now - xvNextPoll) >= 0) xvStartPoll(xvVersionDone ? 's' : 'v', now);
+    // no poll while the dish moves: a reply would hold up the live elevation readings
+    if ((int32_t)(now - xvNextPoll) >= 0 && !tiltLive(now)) xvStartPoll(xvVersionDone ? 's' : 'v', now);
     return;
   }
   while (xvSerial.available() > 0) {
@@ -562,6 +850,19 @@ void setup() {
   tempSetup();
 #if PWR_ENABLE
   pwrSetup();
+#endif
+#if HAS_TILT || HAS_ENV
+  i2cBegin();
+#endif
+#if HAS_TILT
+  Serial.println(tiltInit() ? F("I:ADXL355 ok") : F("I:ADXL355 not found"));
+  tiltRetry = millis() + SENSOR_RETRY_MS;
+#endif
+#if HAS_ENV
+  if (envInit()) Serial.println(envChip == 0x60 ? F("I:BME280 ok") : F("I:BMP280 ok (no humidity)"));
+  else Serial.println(F("I:BME280 not found"));
+  envRetry = millis() + SENSOR_RETRY_MS;
+  envNext = millis() + 1000;
 #endif
 #if XV_SERIAL_ENABLE
   xvSerial.begin(XV_BAUD);
@@ -600,17 +901,33 @@ void loop() {
     }
   }
   serviceTemp(now);
-#if PWR_ENABLE && XV_SERIAL_ENABLE
-  if (!xvWaiting) servicePower(now);   // no I2C while a transverter reply may be arriving
-#elif PWR_ENABLE
-  servicePower(now);
+  // No I2C while a transverter reply may be arriving.
+#if XV_SERIAL_ENABLE
+  bool i2cOk = !xvWaiting;
+#else
+  bool i2cOk = true;
+#endif
+  if (i2cOk) {
+#if PWR_ENABLE
+    servicePower(now);
+#endif
+#if HAS_TILT
+    serviceTilt(now);
+#endif
+#if HAS_ENV
+    serviceEnv(now);
+#endif
+  }
+  (void)i2cOk;
+#if HAS_TILT
+  tiltTick(now);
 #endif
 #if XV_SERIAL_ENABLE
   serviceXv(now);
 #endif
   if ((int32_t)(now - nextReport) >= 0) {
     bool active = paPk > ACTIVE_MV;
-    sendReport();
+    sendReport(now);
     lastSent = now;
     nextReport = now + (active ? REPORT_ACTIVE_MS : REPORT_IDLE_MS);
   }

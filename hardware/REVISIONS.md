@@ -37,8 +37,15 @@ Not yet ordered. Changes from Rev A:
   too, but A3 floats on them, so build their firmware with `PTT_SENSE 0` (on the
   arduino-cli command line: `-DPTT_SENSE=0`), or add the four parts off the board at the
   Nano's A3 socket pin.
-- DRC: as Rev A (library-path notes only), plus one thermal-relief note on C5's GND pad
-  (one spoke instead of two; solders fine). 0 unconnected pads.
+- **Dish elevation and box air sensors (2026-11-25):** the shifter's spare channels 3 and 4
+  now carry I2C: LV3/HV3 SDA (Nano A4), LV4/HV4 SCL (A5). Two new 1x4 headers on the
+  3.3 V side, J2 "ELEV" (ADXL355 plate on the dish frame) and J3 "AIR" (BME280 in the
+  box), pin order SDA, SCL, 3V3, GND (square pad = SDA), the same as the prototype
+  sensor board. Needs tower firmware remtlm 0.7.0 or later. A Rev A board gets the
+  same sensors through the prototype sensor board (docs/prototype).
+- DRC: as Rev A (library-path notes only), plus single-spoke thermal-relief notes on the GND
+  pads of C5 and the shifter's HV-row socket (one spoke instead of two; both connected,
+  solder fine). 0 unconnected pads.
 
 
 ## RK-301 / RK-302 / RK-303 Rev A (2026-11)

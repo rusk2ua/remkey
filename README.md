@@ -55,7 +55,7 @@ firmware/platformio.ini        optional PlatformIO/VS Code build
 firmware/remtlm/               tower telemetry over LoRa (tower, psu + base roles), section 9
 host/remkey/station.py         shack service (Windows)
 host/remkey/client.py          travel client (macOS; Linux works too)
-host/remkey/protocol.py        network protocol, CW text sanitiser
+host/remkey/protocol.py        network protocol, CW text sanitizer
 host/remkey/telemetry.py       remtlm packet parsing, calibration, link statistics
 host/remkey/tlmview.py         bench viewer for calibrating the PA power sense
 host/remkey/powerstats.py      tower supply statistics from the CSV log; suggested alert limits
@@ -405,6 +405,8 @@ The **tower-top box** (TOWER image) is set up for a **Kuhne MKU 10 G5** transver
 - **The key line to the sequencer** (MKU CON1 pin 8, PTT out, active low; tower firmware 0.6.0+): whether it was keyed during each interval, and its voltage. Changes are reported right away. It tells you which side failed when the MKU transmits but the PA doesn't, and it catches a key line stuck low
 - **Two DS18B20 probes**: PA heatsink and MKU case
 - **The MKU's serial status**: the `v` (firmware) reply once after boot, then the `s` (status) reply every minute, relayed verbatim
+- **Dish elevation** (tower firmware 0.7.0+): one ADXL355 on the frame that carries both dishes (10 and 24 GHz, one actuator). The dashboard shows it on an analog-style dial, updated 5 times a second while the dish moves
+- **Box air** (0.7.0+): a BME280 in the box for temperature, humidity, pressure and dew point, with a condensation alert
 
 The **supply box at the tower base** (PSU image) is separate, so it can go in before the top box and keeps reporting if the top box is down:
 
@@ -423,7 +425,7 @@ The top box can optionally get its own INA226 as well (`PWR_ENABLE 1`). With bot
 │ MKU pin 8 PTT out ► A3 │                  │            │                              │
 │ DS18B20 ×2 ───────► D5 │   Nano     $RT  │    LoRa    │  ─► client: Ctrl-P, Ctrl-K,   │
 │ MKU pins 11/12 ◄──► D11/D12 (via shifter)│     ▲      │     Ctrl-V, alerts, TX summary│
-│ (optional INA226 ─► A4/A5)               │     ║      │                              │
+│ ADXL355, BME280 (+opt. INA226) ─► A4/A5  │     ║      │                              │
 └───────────────▲──────────────────────────┘     ║      └──────────────────────────────┘
                 ║ tower cable (+/−)              ║
  TOWER BASE     ║                                ║
@@ -457,7 +459,8 @@ The station service opens both shack ports. The keying path and the telemetry pa
 
 - The link runs on **927.125 MHz** (E220-900T22D channel 77, set by `LORA_CHANNEL` in `firmware/remtlm/config.h`). That's the top of the US 902–928 MHz band and about 24 MHz clear of 902–903 weak-signal work.
 - Treat the link as part of your **amateur station (Part 97)**. 927 MHz is in the 33 cm band, the packets are plain ASCII with no encryption, every packet carries your callsign, and §97.221(b) allows automatic control of data emissions on 6 m and shorter. It is *not* a Part 15 device in this configuration: a single-channel module at 17 dBm doesn't fit the unlicensed rules.
-- Airtime: roughly 60–70 ms per packet at the 9.6 kbps air rate. The top box sends a `$RT` every 2 s while idle and every 0.5 s while the PA shows output (plus a `$RP` before each one if it has its own INA226).
+- Airtime: roughly 60–70 ms per packet at the 9.6 kbps air rate. The top box sends a `$RT` every 2 s while idle and every 0.5 s while the PA shows output (plus a `$RP` before each one if it has its own INA226). With the 0.7.0 sensors it adds a `$RA` (elevation, ~50 ms) before each `$RT`, a `$RB` (box air) every 10 s and a `$RC` (the BME280's calibration constants) every 5 minutes, all just ahead of a `$RT`.
+- **Live elevation.** While the dish moves, the tower sends a `$RA` every 200 ms, until it has been still for 3 s; that uses about a quarter of the channel while it lasts, and nothing when the dish is parked. Live packets skip the 450 ms after each `$RT`, which is the supply box's slot, so the supply box keeps reporting while the dish moves. No MKU status poll starts while the dish moves.
 - **Two transmitters, one channel.** The base E220 can only listen on one channel, so both boxes use channel 77. To keep them from colliding, the supply box listens too: it sends its `$RS` about 60 ms after the end of each tower `$RT` it hears, in the gap before the tower's next packet, which is at least 0.5 s away. If it hears no tower packet for 3.5 s (top box down, or not built yet), it sends every 2 s on its own timer. It never sends more often than every 0.4 s.
 - Transmit power defaults to 17 dBm, which is plenty for 200 ft through block. Raise it with `LORA_TX_POWER` if the link is marginal.
 
@@ -483,6 +486,9 @@ The station service opens both shack ports. The keying path and the telemetry pa
 | 1 | DS18B20 probe + 4.7 kΩ resistor | Supply box: box temperature |
 | 1 | Weatherproof box with cable glands | Tower |
 | (1+1) | INA226 module + shunt | Optional, tower top (`PWR_ENABLE 1`): measured cable drop |
+| 1 | ADXL355 breakout, wired for I2C | Tower (0.7.0+): dish elevation, on its own stiff plate on the dish frame |
+| 1 | BME280 breakout (a real BME280: a BMP280 has no humidity) | Tower (0.7.0+): box air |
+| 2 | 4-wire leads | Tower: to J2/J3 on RK-302 Rev B, or to the sensor board on a Rev A |
 
 ### Wiring: E220 to Nano (same on all three Nanos)
 
@@ -643,7 +649,7 @@ Afterwards, the Nano finds its module already set and skips the write at boot: n
    - CH340 Nanos get their COM number from the USB port they're plugged into. FTDI Nanos carry a serial number, so they keep their own COM number in any port.
 3. At boot, each Nano prints `V:remtlm 0.4.0 tower|base|psu`, then `C:ok ch=77 freq_khz=927125`. The first boot also prints `C:written`, since it writes the settings to the module once.
    - `C:ERR read config` means the Nano can't talk to the module: check the M0, M1 and AUX wiring and the module's power.
-4. The tower also prints `I:temperature probes=2` (and `I:INA226 ok` if it has one).
+4. The tower also prints `I:temperature probes=2` (and `I:INA226 ok` if it has one). From 0.7.0 it also prints `I:ADXL355 ok` and `I:BME280 ok` (or `not found`; it keeps looking every 5 s, so a sensor plugged in later is picked up). It sends a `$RA` before every `$RT`, a `$RC` at the first report and a `$RB` every 10 s.
 5. The supply box prints `I:temperature probes=1` and `I:INA226 ok`, then `$RS,...` every 2 s. When it starts hearing the tower it prints `I:tower heard, sending in its gaps`, and from then on each `$RS` follows a tower `$RT`. If the tower goes quiet it prints `I:tower not heard, sending on own timer`.
    - `I:INA226 not found` means the I2C wiring or address is wrong; the Nano keeps working, reports `ok=0`, and retries every 5 s.
    - To narrow it down, flash `firmware/tools/i2c_check` to the same Nano. It reports the idle state of SDA and SCL, then scans the bus and says whether remtlm would accept what it finds. Both lines should idle HIGH. If one reads LOW with the Nano out of its carrier, measure that pin to GND with power off and compare it with the other one: a healthy A4/A5 reads around 10k or more, while a damaged pin reads a few hundred ohms. A Nano with a damaged pin has to be replaced.
@@ -671,10 +677,12 @@ In `station.toml`, set `tlm_port` to the base Nano's COM port. Then:
   - supply box at or above `box_temp_warn_c`
   - **MKU transmitting but no PA output** (MON at or above `mon_tx_mv`, PA sense below `pa_tx_mv`, for `pa_silent_s`). The alert says whether the key line to the sequencer was asserted: if it was, look at the sequencer and PA; if not, the MKU isn't keying them (its PTT out or the pin 8 wiring). Needs tower firmware 0.6.0
   - **Key line stuck keyed:** asserted continuously for `ptt_stuck_s` (default 120 s; set it longer than your longest transmission). The alert includes the supply current and the PA heatsink temperature, which both climb when the PA stays keyed
+  - **Tower box humidity** at or above `env_rh_warn`, and **near condensation**: box air within `env_dew_margin_c` of its dew point (0.7.0 sensors)
+  - Elevation sensor (ADXL355) or box air sensor (BME280) not answering
 - **TX summary:** when you drop PTT, the client prints `last TX: PA peak … W | supply min … V, peak … A`.
 - **Signal strength:** with base firmware 0.5.0 or later, the dashboard's tower and supply-box cards show a "Signal at shack" line: the latest RSSI, the 5-minute average and worst case, and the margin over the noise floor. The margin is shown as a warning below 10 dB. The cloud summary has the same figures.
 - **Key line:** the dashboard's tower card shows "Key line (MKU pin 8)": keyed or not, its voltage, and how long it's been keyed. The cloud summary and `tlmview` show it too.
-- **CSV log:** every reading is also logged to `remkey-tlm.csv`, which gives you temperature, voltage and current history: one row per top-box packet, or per supply-box packet while the top box is silent. `supply_at` says where the voltage was measured (`base` or `top`). `top_v_avg` holds the top voltage when both boxes measure. `key_line` and `key_line_v` hold the key-line state and voltage. The station log records each transverter reply.
+- **CSV log:** every reading is also logged to `remkey-tlm.csv`, which gives you temperature, voltage and current history: one row per top-box packet, or per supply-box packet while the top box is silent. `supply_at` says where the voltage was measured (`base` or `top`). `top_v_avg` holds the top voltage when both boxes measure. `key_line` and `key_line_v` hold the key-line state and voltage. `elev_deg`, `elev_raw_deg` and `tilt_temp_c` hold the dish elevation, its raw angle and the sensor temperature (the temperature fit reads these), and `box_air_c`, `box_rh` and `box_hpa` the box air. The station log records each transverter reply.
 
 ### Web dashboard
 
@@ -688,8 +696,9 @@ What it shows:
 
 - **Supply box** (tower base): voltage, current, interval min/max and peak, box temperature, INA226 state, link loss and uptime, plus min/max since you last reset them.
 - **Tower top**: PA peak and average power (W once `pa_cal` is set, mV before), MKU MON, 10 MHz reference lock, both probe temperatures, link loss. Until the top box exists this card just says it's waiting.
+- **Dish elevation · box air**: a panel-meter dial for the frame's elevation, with the reading to 0.01°. While the dish moves, each reading reaches the page as it arrives (5 a second) and the needle glides between them; a "moving" badge shows live mode. Below: the raw angle, the sensor temperature, the calibration in use, and the box's air temperature, humidity, dew point and margin, and pressure.
 - **Transverter status**: the MKU's latest `s` reply and its firmware version.
-- **History charts** (15 min to 12 h): supply voltage with its min–max band and alert lines, current (average and peak), all three temperatures, and PA output with reference-unlock periods shaded. Hover or tap a chart for exact values. After a restart the charts reload from `remkey-tlm.csv`.
+- **History charts** (15 min to 12 h): supply voltage with its min–max band and alert lines, current (average and peak), all temperatures (including the tower box air), dish elevation, and PA output with reference-unlock periods shaded. Hover or tap a chart for exact values. After a restart the charts reload from `remkey-tlm.csv`.
 - **Alerts**: the same alerts the Mac client prints, newest first. **Beep** sounds on new warnings (per browser; click it once to allow sound).
 - The header shows each link's state, and whether a remote client is connected and PTT is on.
 
@@ -784,6 +793,37 @@ A useful `i_min_alert` (current well below normal) catches something in the box 
 
 **If the drop turns out to be too large,** the options are heavier cable, raising the supply at the base (keeping the top under 14 V at receive current), or a supply with remote-sense terminals wired to the enclosure.
 
+### Dish elevation and box environment
+
+From tower firmware 0.7.0 and host 0.11.0, the tower-top box can carry two I2C sensors:
+
+- **An ADXL355** on the frame that carries both dishes. One actuator moves the frame, so one sensor gives the elevation of both. It measures gravity, so it reads the true elevation above the horizon whatever the mast and tower are doing.
+- **A BME280** inside the box: air temperature, humidity and pressure. The host works out the dew point and warns before anything condenses.
+
+Both are 3.3 V parts and the Nano is a 5 V part, so they go through a level shifter. On RK-302 Rev B that's channels 3 and 4 of the shifter already on the board, with two headers: J2 "ELEV" for the ADXL355 plate and J3 "AIR" for the BME280. Both are pinned SDA, SCL, 3V3, GND from the square pad. On a Rev A, the [sensor board](docs/prototype/README.md#tower-sensor-board-dish-elevation-and-box-environment-for-a-rk-302-rev-a) does the same job with a second shifter module, and the same leads fit it.
+
+![Tower sensors: ADXL355 and BME280 on I2C through the shifter's channels 3 and 4](docs/img/remtlm-tower-sensors-schematic.svg)
+
+**Why the ADXL355:** what matters for elevation is how far the zero moves with temperature. Consumer IMUs such as the LSM6DS3 drift about 0.03° per °C, which uses up a 0.25° budget in under 10 °C. The ADXL355 is guaranteed to 0.15 mg/°C (about 0.009°/°C) in a hermetic package, and its drift repeats, so a one-time temperature fit removes most of it.
+
+**Mounting:**
+- Put the ADXL355 breakout on its own small, stiff plate, bolted to the dish frame. A large PCB flexes as it heats and cools, and the sensor reads that flex as tilt.
+- The plate can sit at any roll about the boresight; only the axis along the boresight matters. Set it as `elev_axis` (`"x"`, `"y"` or `"z"`, with a `-` if it points backwards).
+- Shade the box from direct sun if you can: the smaller the temperature swing, the less there is to correct.
+
+**Calibration**, done once with a digital inclinometer:
+
+1. Set `elev_axis` and restart the station service. The dashboard, or `python -m remkey.tlmview` with the service stopped, shows the raw angle.
+2. With the dish on its 0° stop, hold the inclinometer on the dish rim (on a prime-focus dish the rim plane is square to the boresight) and note both readings. Repeat at a few angles across the range you use, e.g. 5°, 10° and 20°.
+3. Enter the pairs as `elev_cal = [[raw, inclinometer], ...]` and restart. One pair sets the zero; two or more also correct the sensor's scale. The dashboard shows how well the line fits the points.
+4. **Temperature, once:** leave the dish parked on the stop for a few weeks of changing weather (a 20 °C swing or more), then run `python -m remkey.elevfit remkey-tlm.csv --config station.toml`. It prints `elev_tc_deg_per_c` and `elev_t_ref_c` for `station.toml`, and how much they tighten the readings. Nothing needs repeating after that.
+
+The dashboard dial runs from `elev_min_deg` to `elev_max_deg` (default −2° to 22°).
+
+**The BME280:** put it anywhere in the box, away from the buck converter and the Nano. A BMP280 breakout (sold as BME280 more often than you'd think) works too, but has no humidity sensor; the tower says which it found (`I:BMP280 ok (no humidity)`). The tower sends the chip's calibration constants after boot and every 5 minutes, so after a station restart the box air readings may take up to 5 minutes to appear.
+
+**Firmware settings** (`config.h`): `TILT_ENABLE` and `ENV_ENABLE` (both on by default; a missing sensor costs one short packet every 30 s), and the live-mode settings `LIVE_PERIOD_MS` (200), `LIVE_HOLD_MS` (3000) and `LIVE_THRESHOLD` (350 counts, about 0.08°). Raise `LIVE_THRESHOLD` if wind sway keeps starting live mode. **Host settings** (`station.toml`): `elev_axis`, `elev_cal`, `elev_tc_deg_per_c`, `elev_t_ref_c`, `elev_min_deg`, `elev_max_deg`, `env_rh_warn`, `env_dew_margin_c` and `env_altitude_m` (above 0 adds sea-level pressure); see `station.example.toml`.
+
 ### Calibrating the PA power sense
 
 Detector outputs aren't linear in power (Kuhne says the same of MON), so remkey uses a table you measure:
@@ -804,7 +844,7 @@ The manual lists what `s` reports (sequencer delays, frequency settings, referen
 
 - Network protocol: JSON lines over TCP, documented in `host/remkey/protocol.py`.
 - Serial protocol: newline-terminated commands at 115200 baud, documented at the top of `firmware/remkey/remkey.ino`.
-- Telemetry packets: `$RT,...` tower readings, `$RS,...` supply-box readings, `$RP,...` optional top-box supply readings and `$RK,...` transverter replies, documented in `firmware/remtlm/tlm_proto.h`.
+- Telemetry packets: `$RT,...` tower readings, `$RS,...` supply-box readings, `$RP,...` optional top-box supply readings, `$RK,...` transverter replies, and from 0.7.0 `$RA,...` dish elevation, `$RB,...` box air and `$RC,...` the BME280's calibration constants, documented in `firmware/remtlm/tlm_proto.h`.
 
 ## Related
 
