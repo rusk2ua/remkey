@@ -525,6 +525,115 @@ def tower_board():
     return d, used
 
 
+# ---------------------------------------------------------------------------
+# Tower sensor board: dish elevation (ADXL355) and box environment (BME280), for a
+# RK-302 Rev A board. Same BSS138 4-channel module as on the RK-302: channel 1 SDA,
+# channel 2 SCL. The 3.3 V side carries the two sensor headers; the 5 V side goes to
+# the Nano's A4/A5. Rows 6-7 hold the module's unused channels 3 and 4.
+# ---------------------------------------------------------------------------
+SENSOR_STRIPS = {
+    (2, "L"): "SDA_3V3", (3, "L"): "SCL_3V3", (4, "L"): "3V3", (5, "L"): "GND",
+    (6, "L"): "LV3", (7, "L"): "LV4",
+    (2, "R"): "SDA_5V", (3, "R"): "SCL_5V", (4, "R"): "5V", (5, "R"): "GND",
+    (6, "R"): "HV3", (7, "R"): "HV4",
+}
+SHIFTER = (("LV1", "HV1"), ("LV2", "HV2"), ("LV", "HV"), ("GND", "GND"), ("LV3", "HV3"), ("LV4", "HV4"))
+
+
+def tower_sensor_board():
+    d = Drawing("Tower sensor board (dish elevation + box environment) for a RK-302 Rev A",
+                "Same BSS138 4-channel shifter as on the RK-302: channel 1 = SDA, channel 2 = SCL. "
+                "ADXL355 plate and BME280 on 4-wire leads; five wires to the Rev A board.",
+                width=1700)
+    d.board()
+    nc = Netcheck()
+
+    def net(h):
+        return SENSOR_STRIPS[(int(h[1:]), "L" if h[0] in "ABCDE" else "R")]
+
+    # shifter in two 1x6 sockets: LV row in D2-D7, HV row in F2-F7
+    for i, (lv, hv) in enumerate(SHIFTER):
+        r = i + 2
+        nc.use(f"D{r}", net(f"D{r}"), f"BSS138 {lv}")
+        nc.use(f"F{r}", net(f"F{r}"), f"BSS138 {hv}")
+    x0, y0 = d.xy("D2")
+    x1, y1 = d.xy("F7")
+    d.el.append(f'<rect x="{x0 - 14}" y="{y0 - 14}" width="{x1 - x0 + 28}" height="{y1 - y0 + 28}" rx="4" '
+                'fill="#0b5d3b" opacity="0.8" stroke="#fff" stroke-dasharray="5,4"/>')
+    for i, (lv, hv) in enumerate(SHIFTER):
+        r = i + 2
+        d.pin(f"D{r}", "", "#0d3")
+        d.pin(f"F{r}", "", "#0d3")
+        x, y = d.xy(f"E{r}")
+        d.el.append(f'<text x="{x}" y="{y + 4}" class="tiny" fill="#fff" text-anchor="middle">{lv}|{hv}</text>')
+    d.el.append(f'<text x="{(x0 + x1) / 2}" y="{y1 + 30}" class="tiny" fill="#fff" text-anchor="middle">'
+                'BSS138 4ch (ch 3, 4 unused)</text>')
+
+    # sensor headers on the 3.3 V side: B2-B5 = ADXL355 plate, C2-C5 = BME280 (SDA, SCL, 3V3, GND)
+    order = ("SDA", "SCL", "3V3", "GND")
+    for col, who, color in (("B", "ADXL355", "#6a1b9a"), ("C", "BME280", "#00838f")):
+        for i, n in enumerate(order):
+            h = f"{col}{i + 2}"
+            nc.use(h, net(h), f"{who} {n}")
+            d.pin(h, "", color)
+    for r, n in ((2, "SDA (3.3 V)"), (3, "SCL (3.3 V)"), (5, "GND")):
+        x, y = d.xy(f"A{r}")
+        d.el.append(f'<text x="{x - 48}" y="{y + 5}" class="sm" fill="#222" text-anchor="end">row {r}: {n}</text>')
+    xb, yb = d.xy("A17")
+    for i, (txt, color) in enumerate((("purple, B2-B5: ADXL355 plate lead", "#6a1b9a"),
+                                      ("teal, C2-C5: BME280 lead", "#00838f"),
+                                      ("each top to bottom: SDA, SCL, 3V3, GND", "#222"))):
+        d.el.append(f'<text x="{xb - 40}" y="{yb + 80 + i * 20}" class="sm" fill="{color}">{txt}</text>')
+    d.min_h = yb + 150
+
+    # +3.3 V from the Rev A board's regulator, into row 4 left (left edge, straight in)
+    nc.use("A4", net("A4"), "3V3 in")
+    d.wire("A4", "Rev A: +3.3 V (AMS1117 OUT)", "#ef6c00", "l")
+    # wires to the Rev A board, right edge
+    for h, lab, c in (("J2", "Rev A: Nano A4  (SDA)", COL["nano"]), ("J3", "Rev A: Nano A5  (SCL)", COL["nano"]),
+                      ("J4", "Rev A: +5 V", COL["5v"]), ("J5", "Rev A: GND", COL["gnd"])):
+        nc.use(h, net(h), lab)
+        d.wire(h, lab, c, "r")
+
+    d.note(["Shifter: the same BSS138 4-channel module as on the RK-302,",
+            "  in two 1x6 sockets: LV1 D2, LV2 D3, LV D4, GND D5, LV3 D6,",
+            "  LV4 D7; HV1 F2 ... HV4 F7 (go by the labels on the module).",
+            "  Channel 1 carries SDA, channel 2 SCL. Rows 6-7: unused",
+            "  channels 3 and 4, nothing else in those rows.",
+            "  The module's own 10k pull-ups serve as the I2C pull-ups",
+            "  on both sides, so the board needs no others.",
+            "",
+            "3.3 V side (left half):",
+            "  row 2 SDA, row 3 SCL, row 4 +3.3 V, row 5 GND.",
+            "  ADXL355 plate lead in B2-B5, BME280 lead in C2-C5",
+            "  (SDA, SCL, 3V3, GND from the top). +3.3 V in at A4.",
+            "  Column E sits under the module: leave it empty.",
+            "",
+            "5 V side (right half), five wires to the Rev A board:",
+            "  J2 -> Nano A4 (SDA), J3 -> Nano A5 (SCL): solder to the",
+            "    Nano socket's A4 / A5 pads on the underside (Rev A",
+            "    leaves them unconnected).",
+            "  J4 -> +5 V and J5 -> GND: any +5 V / GND pad, e.g. the",
+            "    Nano socket's 5V and GND pins.",
+            "  A4 <- +3.3 V: the AMS1117 module's OUT pin (U2), or the",
+            "    on-board shifter's LV pin (U3). Not the Nano's 3V3.",
+            "",
+            "Check with a meter before plugging in the sensors:",
+            "  row 4 left = 3.3 V, row 4 right = 5 V,",
+            "  rows 2 and 3 left idle at 3.3 V, right at 5 V.",
+            "",
+            "Sensor straps (on the breakouts, for I2C):",
+            "  ADXL355: CS/SCL = SCL, MOSI/SDA = SDA, SCLK/VSSIO to GND,",
+            "    MISO/ASEL to GND (address 0x1D; to 3.3 V for 0x53).",
+            "    VSUPPLY and VDDIO to 3.3 V. Confirm against your",
+            "    breakout's documentation.",
+            "  BME280: CSB to 3.3 V (I2C mode), SDO to GND (0x76) or",
+            "    3.3 V (0x77). Most breakouts strap these already.",
+            "  The firmware finds either address of each."],
+           x=d.x0 + 11 * U + 420, y=d.y0 - 20)
+    return d, len(nc.holes)
+
+
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else "."
     for name, fn in (("proto-e220-board", e220_board), ("proto-shack-interface", shack_board),
@@ -534,3 +643,6 @@ if __name__ == "__main__":
     d, used = tower_board()
     open(f"{out}/proto-tower-board.svg", "w").write(d.svg())
     print(f"proto-tower-board ({used} holes)")
+    d, used = tower_sensor_board()
+    open(f"{out}/proto-tower-sensors.svg", "w").write(d.svg())
+    print(f"proto-tower-sensors ({used} holes)")

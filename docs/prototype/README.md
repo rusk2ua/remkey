@@ -56,6 +56,26 @@ The level shifter's low side takes its 3.3 V from the Nano's 3V3 pin (A16). It d
 
 **The key-line network** reads MKU CON1 pin 8, the active-low PTT output to the sequencer. The tower only watches it. The 100k pull-up makes an open line (sequencer unplugged or dead) read about 2 V, not "keyed". The 47k/22k divider keeps A3 under 5 V with up to about 15 V on the line, so it doesn't matter whether pin 8 is open collector or driven.
 
+### Tower sensor board (dish elevation and box environment, for a RK-302 Rev A)
+
+![Tower sensor board](proto-tower-sensors.png)
+
+This board adds the ADXL355 (dish elevation) and the BME280 (temperature, humidity and pressure inside the box) to a RK-302 Rev A board. Both sensors are 3.3 V parts on I2C, and the Nano is a 5 V part, so they go through a level shifter. It's the same BSS138 4-channel module the RK-302 uses for the MKU serial link: channel 1 carries SDA, channel 2 SCL. Its own 10k pull-ups serve as the I2C pull-ups on both sides. (RK-302 Rev B does the same job on the board, with the spare channels 3 and 4 of its own shifter.)
+
+1. **The shifter** in two 1x6 sockets: LV1 in D2 … LV4 in D7, HV1 in F2 … HV4 in F7, going by the labels printed on the module. Rows 6 and 7 hold the unused channels 3 and 4; nothing else goes in them. Column E is under the module: leave it empty.
+2. **The sensor leads** on the 3.3 V side, each in the same order from the top (SDA, SCL, 3V3, GND): the ADXL355 plate in B2–B5, the BME280 in C2–C5. A 1x4 header in each lets you unplug them.
+3. **Five wires to the Rev A board:**
+   - J2 → the Nano's A4 (SDA) and J3 → A5 (SCL). Rev A leaves those socket pads unconnected: solder to them on the underside.
+   - J4 → +5 V and J5 → GND, for example at the Nano socket's 5V and GND pins.
+   - A4 ← +3.3 V from the board's AMS1117 module (U2's OUT pin), or the on-board shifter's LV pin (U3). Don't use the Nano's 3V3 pin for this.
+4. **Before the sensors go in:** with the Rev A board powered, row 4 reads 3.3 V on the left and 5 V on the right. Rows 2 and 3 idle at 3.3 V on the left and 5 V on the right.
+
+**The sensors:**
+
+- **ADXL355 plate:** the breakout on its own small, stiff plate, bolted to the dish structure, with the 4-wire lead to B2–B5. Wired for I2C: CS/SCL to SCL, MOSI/SDA to SDA, SCLK/VSSIO to GND, MISO/ASEL to GND (address 0x1D; to 3.3 V for 0x53), VSUPPLY and VDDIO to 3.3 V. Check those straps against your breakout's documentation.
+- **BME280:** anywhere in the box away from the buck and the Nano, on its lead to C2–C5. CSB to 3.3 V (I2C mode) and SDO to GND (0x76) or 3.3 V (0x77); most breakouts strap these already.
+- The firmware finds either address of each sensor by itself, and it tells a real BME280 from a BMP280 (no humidity).
+
 ## Nano screw terminals
 
 **Shack Nano** (BASE firmware; USB to the shack PC):
@@ -153,6 +173,11 @@ The level shifter's low side takes its 3.3 V from the Nano's 3V3 pin (A16). It d
 | 1 | Tall 1x7 female header (or two stacked) | Tower: A1–A7, for the E220 |
 | 1 | BSS138 4-channel level shifter | Tower: two 1x4 sockets, D14–D17 and F14–F17 |
 | 2 | DS18B20 probes | Tower: PA heatsink, transverter case |
+| 1 | BSS138 4-channel level shifter | Tower sensor board: two 1x6 sockets, D2–D7 and F2–F7 |
+| 2 | 1x6 female header | Tower sensor board: sockets for the shifter |
+| 2 | 1x4 header | Tower sensor board: B2–B5 (ADXL355 lead), C2–C5 (BME280 lead) |
+| 1 | ADXL355 breakout | Dish plate, I2C (see the straps above) |
+| 1 | BME280 breakout | Inside the tower-top box, I2C |
 
 ## Bring-up order
 
