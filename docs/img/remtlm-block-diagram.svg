@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="760" viewBox="0 0 1600 760" font-family="Helvetica, Arial, sans-serif">
+<title>remtlm: how tower telemetry works</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f2933"/></marker><marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52606d"/></marker></defs>
+<rect width="1600" height="760" fill="white"/>
+<text x="800" y="36" font-size="24" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">remtlm: tower telemetry over LoRa</text>
+<text x="800" y="60" font-size="14" font-weight="normal" font-style="italic" fill="#52606d" text-anchor="middle">Two boxes on the tower report by radio to a receiver in the shack: no wire between the tower and the house</text>
+<rect x="20" y="80" width="640" height="330" rx="14" fill="#fdf3e3" stroke="#c27c0e" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="34" y="104" font-size="15" font-weight="bold" font-style="normal" fill="#c27c0e" text-anchor="start">TOWER-TOP BOX</text>
+<text x="34" y="122" font-size="12" font-weight="normal" font-style="italic" fill="#52606d" text-anchor="start">on the back of the dish</text>
+<rect x="40" y="135" width="230" height="260" rx="8" fill="white" stroke="#c27c0e" stroke-width="2"/>
+<text x="155.0" y="159" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">Sensors</text>
+<text x="155.0" y="181" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">PA output power (peak, avg)</text>
+<text x="155.0" y="198" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">MKU power monitor</text>
+<text x="155.0" y="215" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">10 MHz reference lock</text>
+<text x="155.0" y="232" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">key line to the sequencer</text>
+<text x="155.0" y="249" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">MKU serial status (read-only)</text>
+<text x="155.0" y="266" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">PA and MKU temperatures</text>
+<text x="155.0" y="283" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">dish elevation (ADXL355)</text>
+<text x="155.0" y="300" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">box air: temp, humidity,</text>
+<text x="155.0" y="317" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">pressure (BME280)</text>
+<text x="155.0" y="334" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">supply voltage (optional)</text>
+<rect x="310" y="160" width="170" height="210" rx="8" fill="white" stroke="#c27c0e" stroke-width="2"/>
+<text x="395.0" y="184" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">Tower Nano</text>
+<text x="395.0" y="206" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">samples every 5 ms</text>
+<text x="395.0" y="223" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">so CW dits aren't</text>
+<text x="395.0" y="240" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">missed</text>
+<text x="395.0" y="257" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle"></text>
+<text x="395.0" y="274" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">a report every 2 s,</text>
+<text x="395.0" y="291" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">0.5 s on the air</text>
+<text x="395.0" y="308" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">elevation 5×/s</text>
+<text x="395.0" y="325" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">while the dish moves</text>
+<circle cx="478" cy="162" r="13" fill="#c27c0e"/>
+<text x="478" y="167" font-size="14" font-weight="bold" font-style="normal" fill="white" text-anchor="middle">1</text>
+<rect x="520" y="215" width="120" height="100" rx="8" fill="white" stroke="#c27c0e" stroke-width="2"/>
+<text x="580.0" y="239" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">E220</text>
+<text x="580.0" y="261" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">LoRa radio</text>
+<text x="580.0" y="278" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">17 dBm</text>
+<path d="M270,265 L310,265" fill="none" stroke="#1f2933" stroke-width="2" marker-end="url(#ah)"/>
+<path d="M480,265 L520,265" fill="none" stroke="#1f2933" stroke-width="2" marker-end="url(#ah)"/>
+<rect x="20" y="440" width="640" height="230" rx="14" fill="#f6eefa" stroke="#8a4fb0" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="646" y="464" font-size="15" font-weight="bold" font-style="normal" fill="#8a4fb0" text-anchor="end">SUPPLY BOX AT THE TOWER BASE</text>
+<rect x="40" y="495" width="230" height="150" rx="8" fill="white" stroke="#8a4fb0" stroke-width="2"/>
+<text x="155.0" y="519" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">14 V supply</text>
+<text x="155.0" y="541" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">shunt + INA226:</text>
+<text x="155.0" y="558" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">voltage and current</text>
+<text x="155.0" y="575" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">going up the tower</text>
+<text x="155.0" y="592" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle"></text>
+<text x="155.0" y="609" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">box temperature</text>
+<rect x="310" y="495" width="170" height="150" rx="8" fill="white" stroke="#8a4fb0" stroke-width="2"/>
+<text x="395.0" y="519" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">PSU Nano</text>
+<text x="395.0" y="541" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">min, avg, peak</text>
+<text x="395.0" y="558" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">per interval</text>
+<text x="395.0" y="575" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle"></text>
+<text x="395.0" y="592" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">answers in its own</text>
+<text x="395.0" y="609" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">slot after each</text>
+<text x="395.0" y="626" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">tower report</text>
+<circle cx="478" cy="497" r="13" fill="#8a4fb0"/>
+<text x="478" y="502" font-size="14" font-weight="bold" font-style="normal" fill="white" text-anchor="middle">2</text>
+<rect x="520" y="520" width="120" height="100" rx="8" fill="white" stroke="#8a4fb0" stroke-width="2"/>
+<text x="580.0" y="544" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">E220</text>
+<text x="580.0" y="566" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">LoRa radio</text>
+<path d="M270,570 L310,570" fill="none" stroke="#1f2933" stroke-width="2" marker-end="url(#ah)"/>
+<path d="M480,570 L520,570" fill="none" stroke="#1f2933" stroke-width="2" marker-end="url(#ah)"/>
+<path d="M155,495 L155,395" fill="none" stroke="#52606d" stroke-width="2" marker-end="url(#ahg)"/>
+<text x="165" y="430" font-size="12" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="start" stroke="white" stroke-width="5" stroke-linejoin="round" paint-order="stroke">14 V up the tower cable</text>
+<rect x="680" y="80" width="190" height="590" rx="14" fill="#f2f2f2" stroke="#7b8794" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="694" y="104" font-size="15" font-weight="bold" font-style="normal" fill="#7b8794" text-anchor="start">RADIO LINK</text>
+<path d="M640,265 L900,300" fill="none" stroke="#1f2933" stroke-width="2.5" marker-end="url(#ah)"/>
+<path d="M640,570 L900,330" fill="none" stroke="#1f2933" stroke-width="2.5" marker-end="url(#ah)"/>
+<text x="775" y="145" font-size="13" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">927.125 MHz</text>
+<text x="775" y="162" font-size="13" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">one channel</text>
+<text x="775" y="179" font-size="13" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">9.6 kbps</text>
+<text x="775" y="580" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">checksummed</text>
+<text x="775" y="597" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">text packets</text>
+<text x="775" y="614" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle"></text>
+<text x="775" y="631" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">no lightning path</text>
+<text x="775" y="648" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">into the house</text>
+<rect x="890" y="80" width="690" height="590" rx="14" fill="#eaf6ee" stroke="#2f8a4e" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="904" y="104" font-size="15" font-weight="bold" font-style="normal" fill="#2f8a4e" text-anchor="start">RADIO ROOM</text>
+<text x="904" y="122" font-size="12" font-weight="normal" font-style="italic" fill="#52606d" text-anchor="start">shack PC</text>
+<rect x="905" y="255" width="110" height="120" rx="8" fill="white" stroke="#2f8a4e" stroke-width="2"/>
+<text x="960.0" y="279" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">E220</text>
+<text x="960.0" y="301" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">LoRa radio</text>
+<rect x="1050" y="240" width="160" height="150" rx="8" fill="white" stroke="#2f8a4e" stroke-width="2"/>
+<text x="1130.0" y="264" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">Base Nano</text>
+<text x="1130.0" y="286" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">checks every</text>
+<text x="1130.0" y="303" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">packet</text>
+<text x="1130.0" y="320" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">adds signal</text>
+<text x="1130.0" y="337" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">strength</text>
+<rect x="1250" y="215" width="180" height="200" rx="8" fill="white" stroke="#2f8a4e" stroke-width="2"/>
+<text x="1340.0" y="239" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">Station service</text>
+<text x="1340.0" y="261" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">same program as</text>
+<text x="1340.0" y="278" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">remkey keying</text>
+<text x="1340.0" y="295" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle"></text>
+<text x="1340.0" y="312" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">calibration</text>
+<text x="1340.0" y="329" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">alerts</text>
+<text x="1340.0" y="346" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">history + CSV log</text>
+<circle cx="1428" cy="217" r="13" fill="#2f8a4e"/>
+<text x="1428" y="222" font-size="14" font-weight="bold" font-style="normal" fill="white" text-anchor="middle">3</text>
+<path d="M1015,315 L1050,315" fill="none" stroke="#1f2933" stroke-width="2" marker-end="url(#ah)"/>
+<path d="M1210,315 L1250,315" fill="none" stroke="#1f2933" stroke-width="2" marker-end="url(#ah)"/>
+<text x="1230.0" y="305.0" font-size="12.5" font-weight="normal" font-style="normal" fill="#1f2933" text-anchor="middle" stroke="white" stroke-width="5" stroke-linejoin="round" paint-order="stroke">USB</text>
+<rect x="1462" y="110" width="110" height="95" rx="8" fill="white" stroke="#2f8a4e" stroke-width="2"/>
+<text x="1517.0" y="134" font-size="14" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">Mac client</text>
+<text x="1517.0" y="156" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">Ctrl-P, K, V</text>
+<text x="1517.0" y="173" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">alerts</text>
+<rect x="1462" y="268" width="110" height="95" rx="8" fill="white" stroke="#2f8a4e" stroke-width="2"/>
+<text x="1517.0" y="292" font-size="14" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">Dashboard</text>
+<text x="1517.0" y="314" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">browser, Wi-Fi</text>
+<text x="1517.0" y="331" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">or Tailscale</text>
+<rect x="1462" y="425" width="110" height="95" rx="8" fill="white" stroke="#2f8a4e" stroke-width="2"/>
+<text x="1517.0" y="449" font-size="14" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="middle">Cloud copy</text>
+<text x="1517.0" y="471" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">optional</text>
+<text x="1517.0" y="488" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">read-only</text>
+<path d="M1430,270 L1448,270 L1448,157 L1462,157" fill="none" stroke="#1f2933" stroke-width="2" marker-end="url(#ah)"/>
+<path d="M1430,315 L1462,315" fill="none" stroke="#1f2933" stroke-width="2" marker-end="url(#ah)"/>
+<path d="M1430,360 L1448,360 L1448,472 L1462,472" fill="none" stroke="#1f2933" stroke-width="2" marker-end="url(#ah)"/>
+<text x="1235" y="470" font-size="12.5" font-weight="normal" font-style="italic" fill="#52606d" text-anchor="middle">Separate USB port from the remkey station Nano:</text>
+<text x="1235" y="487" font-size="12.5" font-weight="normal" font-style="italic" fill="#52606d" text-anchor="middle">a telemetry fault can't affect keying.</text>
+<text x="1235" y="504" font-size="12.5" font-weight="normal" font-style="italic" fill="#52606d" text-anchor="middle">Nothing in remtlm can key the radio</text>
+<text x="1235" y="521" font-size="12.5" font-weight="normal" font-style="italic" fill="#52606d" text-anchor="middle">or reconfigure the transverter.</text>
+<text x="1235" y="570" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">Alerts include: reference unlock, over-temperature,</text>
+<text x="1235" y="587" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">low or high supply, MKU keyed but no PA output,</text>
+<text x="1235" y="604" font-size="12.5" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="middle">key line stuck, humidity or condensation, box lost</text>
+<circle cx="60" cy="708" r="13" fill="#c27c0e"/>
+<text x="60" y="713" font-size="14" font-weight="bold" font-style="normal" fill="white" text-anchor="middle">1</text>
+<text x="82" y="713" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="start">The tower reports what the rig can't see</text>
+<text x="82" y="734" font-size="13" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="start">power, lock, keying, temperatures, elevation</text>
+<circle cx="580" cy="708" r="13" fill="#8a4fb0"/>
+<text x="580" y="713" font-size="14" font-weight="bold" font-style="normal" fill="white" text-anchor="middle">2</text>
+<text x="602" y="713" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="start">The supply box reports on its own</text>
+<text x="602" y="734" font-size="13" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="start">voltage, current and cable drop, even with the top box down</text>
+<circle cx="1100" cy="708" r="13" fill="#2f8a4e"/>
+<text x="1100" y="713" font-size="14" font-weight="bold" font-style="normal" fill="white" text-anchor="middle">3</text>
+<text x="1122" y="713" font-size="15" font-weight="bold" font-style="normal" fill="#1f2933" text-anchor="start">One program shows it everywhere</text>
+<text x="1122" y="734" font-size="13" font-weight="normal" font-style="normal" fill="#52606d" text-anchor="start">client hotkeys, live dashboard, cloud summary</text>
+</svg>

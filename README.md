@@ -17,6 +17,25 @@ It is two Arduino Nanos running the same sketch, plus a small Python bridge. Opt
 
 **Quick start:** wire and flash the Nanos (sections 1–3), run the station service on the shack PC (section 4), pick a network path (section 5), and run the client on your Mac (section 6). Do the bench test (section 7) before connecting anything to the tower. For a step-by-step checklist from ordering parts to a hardened station, see [docs/build-plan.md](docs/build-plan.md).
 
+
+## How remkey works
+
+![remkey block diagram: paddle and client Nano at the travel end, characters over the internet, station service and station Nano keying the IC-7610 in the shack](docs/img/remkey-block-diagram.svg)
+
+**In one paragraph:** remkey lets you send CW with your own paddle, from anywhere with an internet connection, through the radio in your shack. A keyer at your end turns your paddle into characters, the characters cross the internet, and a second keyer in the shack sends them to the radio with perfect timing. You hear your own sidetone instantly, and the radio's real sidetone comes back in the receive audio a moment later.
+
+**1. At the travel end, you hear yourself instantly.** The paddle and a PTT switch plug into an Arduino Nano that is an ordinary iambic keyer with its own sidetone, so there is no delay at all in what you hear. As you send, it decodes each character and passes it over USB to the remkey client on the Mac. The client also lets you type CW from the keyboard, has hotkeys for PTT, speed and a tune carrier, and shows tower readings.
+
+**2. Only characters cross the network.** Sending raw key-down and key-up events over the internet doesn't work: network jitter stretches and chops the elements. remkey sends whole characters instead, along with PTT commands and a heartbeat every second, over an authenticated TCP connection (normally inside a Tailscale tunnel). Jitter can delay a character, but it can never distort one.
+
+**3. The shack re-times them perfectly.** The station service on the shack PC checks the client's login and watches the heartbeat. It hands each character to a second Nano, which keys the IC-7610's KEY jack and SEND (PTT) line through optocouplers with exact timing. The SEND line in turn keys the 10 GHz transverter and PA on the tower. The radio runs about one character behind you, which is under a second at normal speeds.
+
+**Feedback.** When the station has actually turned PTT on, the client's PTT LED lights. The receive audio, including the radio's own sidetone, comes back by AnyDesk, so you can confirm what really went out.
+
+**Safety.** If the connection closes, the heartbeat stops for 3 s, or the shack PC or its USB link hangs (the station Nano has its own 3 s watchdog), PTT drops and any queued CW is thrown away at once. Characters sent while the link is down are dropped, not saved, so stale CW never goes out minutes later. N1MM+, rig control and rotator control keep running on the shack PC as before; remkey only adds the keying path.
+
+The same picture as plain text:
+
 ```
   TRAVEL END (Mac)                                         SHACK (Windows PC)
  ┌───────────────────────┐                               ┌─────────────────────────────┐
@@ -396,6 +415,22 @@ Library versions used in CI: EByte LoRa E220 library 1.0.8, OneWire 2.3.8, Dalla
 ## 9. Tower telemetry (remtlm)
 
 Three more Nanos bring tower readings into the radio room over one LoRa channel. Two of them transmit, from two boxes on the tower, and one receives in the shack.
+
+### How remtlm works
+
+![remtlm block diagram: tower-top box and tower-base supply box each send LoRa packets to the base Nano in the radio room, which feeds the station service, Mac client, dashboard and cloud copy](docs/img/remtlm-block-diagram.svg)
+
+**In one paragraph:** remtlm tells you what's happening on the tower while you operate. Two small boxes on the tower measure the things the radio can't see, such as PA output, reference lock, temperatures, supply voltage and dish elevation, and send them by LoRa radio to a receiver in the shack. The station service that already runs remkey turns the readings into hotkey readouts, alerts, a live web dashboard and an optional cloud copy you can check from anywhere.
+
+**1. The tower-top box reports what the rig can't see.** A Nano in the box on the back of the dish watches the PA's power-sense output, the transverter's own power monitor, its 10 MHz reference lock and its key line to the sequencer, sampling every 5 ms so that even a single CW dit is caught. It also reads two temperature probes, the transverter's serial status (read-only), the dish elevation from an ADXL355 on the dish frame, and the box's air temperature, humidity and pressure. It sends a short report every 2 seconds, every half second while the PA is transmitting, and an elevation reading 5 times a second while the dish moves.
+
+**2. The supply box reports on its own.** A second Nano, in the supply box at the tower base, measures the voltage and current going up the tower cable and the box temperature. It is separate so it can be built first and keeps reporting even if the top box is down. Both boxes share one radio channel: the supply box listens for each tower report and sends its own in the gap right after it, so the two never collide.
+
+**3. One program shows it everywhere.** In the radio room, a third Nano with its own LoRa radio checks every packet and adds the signal strength, then passes it over USB to the station service. The service applies the calibrations, raises alerts (reference unlock, over-temperature, low or high supply, the transverter keyed but no PA output, a stuck key line, humidity or condensation in the box, a box gone silent), logs everything to a CSV file, and shows it on the Mac client's hotkeys, a live web dashboard and an optional read-only cloud page.
+
+**Why radio, and why it's safe.** The LoRa link means there is no wire between the tower and the house, so it adds no lightning path. Telemetry uses its own USB port, separate from the remkey station Nano, so a telemetry fault can't affect keying. Nothing in remtlm can key the radio or change the transverter's settings: the tower only ever asks the transverter for its status.
+
+### What each box measures
 
 The **tower-top box** (TOWER image) is set up for a **Kuhne MKU 10 G5** transverter and an external PA:
 
