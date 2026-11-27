@@ -6,7 +6,8 @@
 // It lists every I2C address that acknowledges, then for each one reads the
 // registers remtlm checks (0xFE manufacturer ID, 0xFF die ID) plus the
 // configuration (0x00, 0x4127 at power-up) and bus voltage (0x02, 1.25 mV/bit).
-//   remtlm accepts:  address 0x40, 0xFE = 0x5449, 0xFF = 0x226x
+//   remtlm accepts:  any address 0x40-0x4F (0.7.1+; 0x40 only before),
+//                    0xFE = 0x5449, 0xFF = 0x226x
 // Nano pins: SDA = A4, SCL = A5.
 
 #include <Wire.h>
@@ -68,7 +69,7 @@ void loop() {
         Serial.print(F("  bus="));
         Serial.print(bus * 1.25 / 1000.0, 3);
         Serial.print(F(" V"));
-        bool ok = (a == 0x40) && mfr == 0x5449 && (die & 0xFFF0) == 0x2260;
+        bool ok = (a >= 0x40 && a <= 0x4F) && mfr == 0x5449 && (die & 0xFFF0) == 0x2260;
         Serial.println(ok ? F("  -> remtlm would accept this") : F("  -> remtlm would NOT accept this"));
       } else {
         Serial.println(F("  (acknowledges, but register reads failed)"));

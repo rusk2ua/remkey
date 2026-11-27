@@ -66,3 +66,17 @@ the `RK-30x-revA` tags.
   The 100 mm scale bar printed true.
 - Pre-release drafts (2026-11-15, commits ffa92ff to cc20196) carried "v1.0" on the
   silkscreen, had M3 holes without keep-outs, and were never ordered.
+- **Built and bench-tested 2026-11-27** with remtlm 0.7.1: all three boards together
+  over LoRa, the supply box slotting its `$RS` after each tower `$RT`, dashboard clear.
+  Not yet tested on the tower: PA sense, MKU MON, reference lock and MKU serial with the
+  MKU connected; supply current under load; the ADXL355/BME280 sensor board; link margin
+  over the real path.
+  - RK-301: the INA226 module on hand is strapped for address **0x44** (A1 to VS), not
+    0x40. remtlm 0.7.0 showed "not answering"; 0.7.1 searches 0x40–0x4F and finds it.
+    Supply-side reading 14.616 V; −3 mA with no load (the INA226's zero offset).
+  - RK-302: A3 has no key-line network on Rev A and floats, which reads as "keyed".
+    Build the tower image with `PTT_SENSE=0` (arduino-cli:
+    `-DREMTLM_ROLE=ROLE_TOWER -DPTT_SENSE=0`), or add the Rev B network by hand.
+    On the bench, with no MKU connected, the reference-lock input reads unlocked; set
+    `LOCK_MONITOR=0` on a station without an external 10 MHz reference.
+  - The Nanos used have the current (Optiboot) bootloader: `cpu=atmega328`.

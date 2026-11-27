@@ -65,7 +65,9 @@
 
 // MKU 10 G5 LD (pin 16) is 3.3 V only while locked to an EXTERNAL 10 MHz reference.
 // Without an external reference it stays low: set LOCK_MONITOR 0 to stop alarms.
+#ifndef LOCK_MONITOR
 #define LOCK_MONITOR      1
+#endif
 #define LOCK_ACTIVE_HIGH  1
 #define LOCK_THRESHOLD_MV 1650   // at the pin (no divider on A2)
 
@@ -111,7 +113,9 @@
 #ifndef PWR_ENABLE
 #define PWR_ENABLE       0        // TOWER only: 1 = INA226 in the top box too
 #endif
-#define INA226_ADDR      0x40     // A0 and A1 address pins to GND
+#ifndef INA226_ADDR
+#define INA226_ADDR      0x40     // tried first; the firmware also searches 0x40-0x4F
+#endif
 #define SHUNT_UOHM       3750L    // 20 A / 75 mV panel shunt
 #define PWR_SAMPLE_MS    10UL     // the INA226 produces a new averaged reading every 8.8 ms
 #define PWR_RETRY_MS     5000UL   // re-initialize this often if the INA226 stops answering

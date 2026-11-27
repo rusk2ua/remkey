@@ -3,6 +3,22 @@
 Versions are per component: the Python host package (`host/`), the remkey keyer
 firmware and the remtlm telemetry firmware each carry their own version.
 
+## 2026-11-27 (remtlm 0.7.1)
+
+### remtlm firmware
+- The INA226 is found at any address from 0x40 to 0x4F, not just 0x40. A supply-box
+  module strapped for 0x44 (A1 to VS) passed every wiring check but showed "not
+  answering" on the dashboard. `INA226_ADDR` is still tried first; the boot and retry
+  lines now say where it was found (`I:INA226 ok at 0x44`).
+- `firmware/tools/i2c_check` reports the same acceptance rule.
+- `LOCK_MONITOR` can be set on the command line (`-DLOCK_MONITOR=0`), like `PTT_SENSE`.
+- Only the PSU image and a tower built with `PWR_ENABLE 1` behave differently; the tower
+  and base Nanos need no reflash.
+
+### Hardware
+- `hardware/REVISIONS.md`: the three Rev A boards built and bench-tested together with
+  0.7.1, with what was learned (INA226 at 0x44 on RK-301; `PTT_SENSE=0` on RK-302 Rev A).
+
 ## 2026-11-25 (overview diagrams)
 
 ### Docs

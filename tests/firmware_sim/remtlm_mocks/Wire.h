@@ -1,10 +1,11 @@
-// Wire mock: an I2C bus with a fake INA226 (0x40), ADXL355 (0x1D) and BME280 (0x76)
+// Wire mock: an I2C bus with a fake INA226 (0x40 unless the test moves it), ADXL355 (0x1D) and BME280 (0x76)
 // on it. Each device answers only at its own address; the test sets their readings.
 #pragma once
 #include "Arduino.h"
 
 struct InaSim {
   bool present = true;
+  uint8_t addr = 0x40;     // A0/A1 straps: 0x40-0x4F
   uint16_t shunt = 0;      // register 0x01, 2.5 uV LSB (two's complement)
   uint16_t bus = 0;        // register 0x02, 1.25 mV LSB
   uint16_t config = 0;
@@ -62,7 +63,7 @@ class TwoWire {
   void beginTransmission(uint8_t a) { addr_ = a; tx_.clear(); }
   size_t write(uint8_t b) { tx_.push_back(b); return 1; }
   uint8_t endTransmission(uint8_t = 1) {
-    if (addr_ == 0x40) {
+    if (addr_ == ina.addr) {
       if (!ina.present) return 2;
       if (!tx_.empty()) reg_ = tx_[0];
       if (tx_.size() == 3 && reg_ == 0x00) ina.config = (uint16_t)(tx_[1] << 8 | tx_[2]);
@@ -87,7 +88,7 @@ class TwoWire {
   }
   uint8_t requestFrom(uint8_t a, uint8_t n) {
     rx_.clear();
-    if (a == 0x40) {
+    if (a == ina.addr) {
       if (!ina.present) return 0;
       uint16_t v = reg_ == 0xFE ? 0x5449 : reg_ == 0xFF ? 0x2260 : reg_ == 0x01 ? ina.shunt
                  : reg_ == 0x02 ? ina.bus : ina.config;

@@ -61,7 +61,7 @@
 #include <Wire.h>
 #endif
 
-#define FW_VERSION "0.7.0"
+#define FW_VERSION "0.7.1"
 
 SoftwareSerial loraSerial(PIN_E220_TXD, PIN_E220_RXD);   // (rx, tx) from the Nano's side
 LoRa_E220 e220(&loraSerial, PIN_E220_AUX, PIN_E220_M0, PIN_E220_M1);
@@ -234,9 +234,10 @@ static uint32_t pwrNext = 0, pwrRetry = 0;
 static uint32_t pwrVSum = 0;
 static int32_t pwrISum = 0, pwrIMin = 0, pwrIMax = 0;
 static uint16_t pwrVMin = 0, pwrVMax = 0, pwrN = 0;
+static uint8_t inaAddr = INA226_ADDR;
 
 static bool inaWrite(uint8_t reg, uint16_t v) {
-  Wire.beginTransmission(INA226_ADDR);
+  Wire.beginTransmission(inaAddr);
   Wire.write(reg);
   Wire.write((uint8_t)(v >> 8));
   Wire.write((uint8_t)(v & 0xFF));
@@ -244,22 +245,44 @@ static bool inaWrite(uint8_t reg, uint16_t v) {
 }
 
 static bool inaRead(uint8_t reg, uint16_t *v) {
-  Wire.beginTransmission(INA226_ADDR);
+  Wire.beginTransmission(inaAddr);
   Wire.write(reg);
   if (Wire.endTransmission() != 0) return false;
-  if (Wire.requestFrom((uint8_t)INA226_ADDR, (uint8_t)2) != 2) return false;
+  if (Wire.requestFrom(inaAddr, (uint8_t)2) != 2) return false;
   uint8_t hi = Wire.read();
   uint8_t lo = Wire.read();
   *v = ((uint16_t)hi << 8) | lo;
   return true;
 }
 
-static bool inaInit() {
+static bool inaIsHere() {
   uint16_t mfr = 0, die = 0;
   if (!inaRead(0xFE, &mfr) || !inaRead(0xFF, &die)) return false;
-  if (mfr != 0x5449 || (die & 0xFFF0) != 0x2260) return false;   // "TI", INA226
+  return mfr == 0x5449 && (die & 0xFFF0) == 0x2260;               // "TI", INA226
+}
+
+// The INA226's A0/A1 pins give it one of 16 addresses, 0x40-0x4F, and modules
+// differ in how they strap them (CJMCU-226: 0x40; others 0x44 or 0x45). Try
+// INA226_ADDR (or the address last found) first, then the rest of the range.
+static bool inaInit() {
+  if (!inaIsHere()) {
+    uint8_t first = inaAddr;
+    bool found = false;
+    for (uint8_t a = 0x40; a <= 0x4F && !found; a++) {
+      if (a == first) continue;
+      inaAddr = a;
+      found = inaIsHere();
+    }
+    if (!found) { inaAddr = first; return false; }
+  }
   // AVG=4, VBUS 1.1 ms, VSHUNT 1.1 ms, continuous shunt + bus: 8.8 ms per reading
   return inaWrite(0x00, 0x4000 | (1 << 9) | (4 << 6) | (4 << 3) | 7);
+}
+
+static void inaReport() {
+  if (!pwrUp) { Serial.println(F("I:INA226 not found")); return; }
+  Serial.print(F("I:INA226 ok at 0x"));
+  Serial.println(inaAddr, HEX);
 }
 
 static void pwrResetInterval() {
@@ -274,7 +297,7 @@ static void servicePower(uint32_t now) {
     if ((int32_t)(now - pwrRetry) >= 0) {
       pwrRetry = now + PWR_RETRY_MS;
       pwrUp = inaInit();
-      Serial.println(pwrUp ? F("I:INA226 ok") : F("I:INA226 not found"));
+      inaReport();
     }
     return;
   }
@@ -329,7 +352,7 @@ static PwrStats pwrTake() {
 static void pwrSetup() {
   i2cBegin();
   pwrUp = inaInit();
-  Serial.println(pwrUp ? F("I:INA226 ok") : F("I:INA226 not found"));
+  inaReport();
   pwrRetry = millis() + PWR_RETRY_MS;
   pwrResetInterval();
 }

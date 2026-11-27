@@ -1,6 +1,7 @@
 // Minimal Arduino API mock so remkey.ino can be compiled and exercised on a PC.
 #pragma once
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -44,6 +45,9 @@ inline void tone(int, unsigned int) { sim.toneOn = true; }
 inline void noTone(int) { sim.toneOn = false; }
 inline long map(long x, long a, long b, long c, long d) { return (x - a) * (d - c) / (b - a) + c; }
 
+#define DEC 10
+#define HEX 16
+
 class MockSerial {
  public:
   std::string out;
@@ -59,6 +63,12 @@ class MockSerial {
   void print(long v) { out += std::to_string(v); }
   void print(unsigned long v) { out += std::to_string(v); }
   template <typename T> void println(T v) { print(v); out += "\r\n"; }
+  void println(unsigned long v, int base) {
+    char b[24];
+    std::snprintf(b, sizeof b, base == HEX ? "%lX" : "%lu", v);
+    out += b;
+    out += "\r\n";
+  }
   void println() { out += "\r\n"; }
   void feed(const std::string &s) { for (char c : s) in.push_back(c); }
 };

@@ -516,7 +516,7 @@ The station service opens both shack ports. The keying path and the telemetry pa
 | 1 | 100 kΩ resistor | Tower: pull-down on A2 (LD) |
 | 1 | 100 kΩ + 47 kΩ + 22 kΩ resistors, 100 nF cap | Tower: key-line network on A3 (MKU CON1 pin 8) |
 | — | 2.54 mm female header/jumper wires | Tower: to MKU CON1 |
-| 1 | INA226 module (e.g. CJMCU-226) | Supply box: supply monitor, I2C address 0x40 |
+| 1 | INA226 module (e.g. CJMCU-226) | Supply box: supply monitor. Any I2C address 0x40–0x4F works: the firmware searches for it (0.7.1+) |
 | 1 | 20 A / 75 mV panel-meter shunt (3.75 mΩ) | Supply box: in the + feed to the tower cable (see below) |
 | 1 | DS18B20 probe + 4.7 kΩ resistor | Supply box: box temperature |
 | 1 | Weatherproof box with cable glands | Tower |
@@ -588,7 +588,7 @@ The same wiring as schematics, in two parts: the signals (PA sense, MKU CON1, le
 **Notes:**
 
 - **Why analog for LD:** a 5 V Nano needs about 3.0 V to read a digital high, and LD gives only 3.3 V through 330 Ω. That's too close, so A2 compares against 1.65 V instead.
-- **LD tracks the external 10 MHz reference:** it's high only while the MKU is locked to an *external* 10 MHz reference. If you run without one, set `LOCK_MONITOR 0` so it doesn't alarm.
+- **LD tracks the external 10 MHz reference:** it's high only while the MKU is locked to an *external* 10 MHz reference. If you run without one, set `LOCK_MONITOR 0` so it doesn't alarm (or, from 0.7.1, add `-DLOCK_MONITOR=0` to the arduino-cli build flags).
 - **Probes:**
   - Clamp one DS18B20 under a heatsink screw near the PA device and the other on the MKU housing, both with thermal compound.
   - The MKU is rated for +55 °C case and disables transmit above +65 °C. The default alert for probe 2 is 50 °C.
@@ -686,7 +686,8 @@ Afterwards, the Nano finds its module already set and skips the write at boot: n
    - `C:ERR read config` means the Nano can't talk to the module: check the M0, M1 and AUX wiring and the module's power.
 4. The tower also prints `I:temperature probes=2` (and `I:INA226 ok` if it has one). From 0.7.0 it also prints `I:ADXL355 ok` and `I:BME280 ok` (or `not found`; it keeps looking every 5 s, so a sensor plugged in later is picked up). It sends a `$RA` before every `$RT`, a `$RC` at the first report and a `$RB` every 10 s.
 5. The supply box prints `I:temperature probes=1` and `I:INA226 ok`, then `$RS,...` every 2 s. When it starts hearing the tower it prints `I:tower heard, sending in its gaps`, and from then on each `$RS` follows a tower `$RT`. If the tower goes quiet it prints `I:tower not heard, sending on own timer`.
-   - `I:INA226 not found` means the I2C wiring or address is wrong; the Nano keeps working, reports `ok=0`, and retries every 5 s.
+   - From 0.7.1 the line says where it found the chip, e.g. `I:INA226 ok at 0x44`. Modules differ in how they strap the A0/A1 address pins (the CJMCU-226 gives 0x40; some others 0x44), so the firmware tries `INA226_ADDR` first and then searches 0x40–0x4F.
+   - `I:INA226 not found` means the I2C wiring is wrong or the chip isn't answering anywhere in that range; the Nano keeps working, reports `ok=0`, and retries every 5 s.
    - To narrow it down, flash `firmware/tools/i2c_check` to the same Nano. It reports the idle state of SDA and SCL, then scans the bus and says whether remtlm would accept what it finds. Both lines should idle HIGH. If one reads LOW with the Nano out of its carrier, measure that pin to GND with power off and compare it with the other one: a healthy A4/A5 reads around 10k or more, while a damaged pin reads a few hundred ohms. A Nano with a damaged pin has to be replaced.
 6. The tower and the supply box echo every packet they send on their own USB port, so you can watch them on the bench:
    - `$RT,...` readings, `$RK,...` transverter replies (the first, about 5 s after boot, is the `v` reply)

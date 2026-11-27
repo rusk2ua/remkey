@@ -82,9 +82,9 @@ static void testPsu() {
   ina.shunt = 1600;     // 4.0 mV across 3.75 mOhm = 1066 mA
   dallas.count = 1;
   boot();
-  CHECK(Serial.out.find("V:remtlm 0.7.0 psu") != std::string::npos, "version line: %s", Serial.out.c_str());
+  CHECK(Serial.out.find("V:remtlm 0.7.1 psu") != std::string::npos, "version line: %s", Serial.out.c_str());
   CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_DISABLED, "psu keeps the RSSI byte off");
-  CHECK(Serial.out.find("I:INA226 ok") != std::string::npos, "INA226 found");
+  CHECK(Serial.out.find("I:INA226 ok at 0x40") != std::string::npos, "INA226 found at 0x40");
 
   // 1. No tower: free-running every PSU_REPORT_MS
   run(7000);
@@ -170,6 +170,28 @@ static void testPsu() {
   CHECK(!sent.empty() && sent.back().second.find(",1066,1066,1066,1,") != std::string::npos,
         "INA226 back: %s", sent.empty() ? "(none)" : sent.back().second.c_str());
 
+  // 6d. A module strapped to another address (A1 to VS: 0x44) is found by the search
+  ina.present = false;
+  run(4500);
+  ina.addr = 0x44;
+  ina.present = true;
+  Serial.out.clear();
+  sent.clear();
+  run(12000);
+  CHECK(Serial.out.find("I:INA226 ok at 0x44") != std::string::npos, "found at 0x44: %s", Serial.out.c_str());
+  CHECK(!sent.empty() && sent.back().second.find(",1066,1066,1066,1,") != std::string::npos,
+        "readings at 0x44: %s", sent.empty() ? "(none)" : sent.back().second.c_str());
+  ina.present = false;                  // nothing anywhere in 0x40-0x4F
+  Serial.out.clear();
+  run(12000);
+  CHECK(Serial.out.find("I:INA226 not found") != std::string::npos, "not found anywhere");
+  ina.present = true;
+  run(12000);
+  sent.clear();
+  run(4100);
+  CHECK(!sent.empty() && sent.back().second.find(",1066,1066,1066,1,") != std::string::npos,
+        "back at 0x44: %s", sent.empty() ? "(none)" : sent.back().second.c_str());
+
   // 7. Reverse shunt reads negative
   ina.shunt = (uint16_t)(int16_t)-1600;
   sent.clear();
@@ -186,7 +208,7 @@ static void testTower() {
   ina.shunt = 2400;     // 6 mV -> 1600 mA
   dallas.count = 2;
   boot();
-  CHECK(Serial.out.find("V:remtlm 0.7.0 tower") != std::string::npos, "version line");
+  CHECK(Serial.out.find("V:remtlm 0.7.1 tower") != std::string::npos, "version line");
   CHECK(e220.cfg.TRANSMISSION_MODE.enableRSSI == RSSI_DISABLED, "tower keeps the RSSI byte off");
   CHECK(Serial.out.find("I:temperature probes=2") != std::string::npos, "two probes");
   run(4600);
